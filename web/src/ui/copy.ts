@@ -26,8 +26,13 @@ export const CONFIG = '配置';
 export const RESET = '重置';
 export const RESET_TITLE = '恢复默认配置';
 
+export const FIELD_SLOT = '部位';
 export const FIELD_MAIN = '主词条';
 export const FIELD_INITIAL = '初始';
+
+/** 花 / 羽的主词条固定，没有可选项 */
+export const MAIN_FIXED = '固定';
+export const MAIN_FIXED_HINT = '生之花与死之羽的主词条固定，没有可选项。';
 
 export const SECT_SUBSTATS = '副词条';
 /** 「初始档位」列不存在时（胚子质量页）不显示这段 */
@@ -96,10 +101,20 @@ export function scoredSlotsNote(n: number): string {
 /** 掉落概率：不含成长值，只回答「能不能刷到这件胚子」 */
 export const CARD_DROP = '掉落概率';
 export function dropBreakdown(main: string, subs: string): string {
-  return `部位 1/5 × 主词条 ${main} × 副词条 ${subs}`;
+  return `主词条 ${main} × 副词条 ${subs}`;
 }
-/** 主词条不在任何部位的主词条表里（理论上不会发生，防御性文案） */
-export const DROP_OUT_OF_RANGE = '这个主词条不在任何部位的主词条表里';
+/** 主词条不在该部位的表里（正常操作到不了） */
+export const DROP_OUT_OF_RANGE = '该部位没有这个主词条';
+
+// ---------------------------------------------------------------------------
+// 成长值表（左下角）—— 数值是我们用的口径，可能和游戏实际有出入
+// ---------------------------------------------------------------------------
+
+export const GROWTH_TABLE_TITLE = '成长值';
+export const GROWTH_TABLE_HINT = '四档成长值；已四舍五入，与游戏实际可能有出入。';
+export const TH_GROWTH_ATTR = '词条';
+export const TH_GROWTH_TIERS = ['一档', '二档', '三档', '四档'] as const;
+export const GROWTH_TABLE_EMPTY = '还没有计分词条。';
 
 export const CARD_ATTRS = '有效词条';
 export const CARD_MEAN = '期望得分';

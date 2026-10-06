@@ -1,4 +1,14 @@
-import { SUB_ATTRS, MAIN_ATTRS, excludedSubstat, type MainAttr, type SubAttr } from '../core/stats';
+import {
+  MAIN_ATTRS,
+  SLOTS,
+  SUB_ATTRS,
+  excludedSubstat,
+  excludedAt,
+  mainAttrsOf,
+  type MainAttr,
+  type Slot as ArtifactSlot,
+  type SubAttr,
+} from '../core/stats';
 import {
   isInitialRoll,
   type ArtifactSpec,
@@ -38,6 +48,8 @@ export type Slots = [SlotInput, SlotInput, SlotInput, SlotInput];
  * 加新任务时先问一句：这个配置是「评分标准」还是「这个任务特有的输入」？
  */
 export interface SharedConfig {
+  /** 刷的是哪个部位。它决定主词条的可选项，也决定主词条概率 */
+  slot: ArtifactSlot;
   mainAttr: MainAttr;
   slots: Slots;
   theme: 'light' | 'dark';
@@ -129,6 +141,7 @@ export function weightOnSelect(attr: SubAttr | ''): number {
  */
 export function defaultShared(): SharedConfig {
   return {
+    slot: '杯',
     mainAttr: '火伤',
     slots: [
       { attr: '暴击', weight: CANONICAL_WEIGHT['暴击'], initialRoll: 'random' },
@@ -181,7 +194,7 @@ export interface SpecResult {
  * - 权重非法时**忽略该词条**而不是抛错：输入框可能正处在中间状态（空串、`-`）。
  */
 export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
-  const excluded = excludedSubstat(state.mainAttr);
+  const excluded = excludedAt(state.slot, state.mainAttr);
   const ignored: SubAttr[] = [];
   const usable: { attr: SubAttr; weight: number; initialRoll: InitialRoll }[] = [];
 
@@ -239,6 +252,7 @@ function encodeSlot(s: SlotInput): string {
 
 export function toQuery(state: AppState): string {
   const p = new URLSearchParams();
+  p.set('slot', state.slot);
   p.set('main', state.mainAttr);
   p.set('iv', String(state.initialVisible));
   p.set('target', String(state.targetScore));
@@ -276,10 +290,22 @@ export function fromQuery(search: string): AppState {
     const parts = slotsRaw.split(',');
     if (parts.length !== 4) return fallback;
 
+    const rawSlot = p.get('slot');
+    const slot: ArtifactSlot = (SLOTS as readonly string[]).includes(rawSlot ?? '')
+      ? (rawSlot as ArtifactSlot)
+      : fallback.slot;
+    // 主词条必须在**该部位**可选：老链接（没有 slot）或手改的链接都可能不合法。
+    // 回落目标不是 fallback.mainAttr（它属于另一个部位，可能同样不合法），
+    // 而是该部位权重最高的那个。花 / 羽没有可选项，不做限制。
+    const mains = mainAttrsOf(slot);
+    const mainAttr: MainAttr =
+      mains.length === 0 || mains.includes(main) ? main : mains[0]!;
+
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
     return {
-      mainAttr: main,
+      slot,
+      mainAttr,
       slots: parts.map(decodeSlot) as Slots,
       initialVisible: iv === 3 || iv === 4 ? iv : fallback.initialVisible,
       targetScore: Number.isFinite(target) && target >= 0 ? target : fallback.targetScore,

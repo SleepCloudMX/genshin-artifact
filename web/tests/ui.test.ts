@@ -84,6 +84,17 @@ function clickTab(root: HTMLElement, id: string): void {
   root.querySelector<HTMLButtonElement>(`#tab-${id}`)!.click();
 }
 
+/**
+ * 切到某个部位，再选一个该部位**合法**的主词条。
+ *
+ * 主词条下拉现在按部位限定，所以「直接设 mainAttr」常常是非法值
+ * （暴击只有头能出）。测试必须走这两步，和生产路径一致。
+ */
+function pickSlotAndMain(root: HTMLElement, slot: string, main: string): void {
+  setSelect(root.querySelector<HTMLSelectElement>('#slot')!, slot);
+  setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, main);
+}
+
 /** 点当前主 tab 里标签为 `label` 的子 tab */
 function clickSub(root: HTMLElement, label: string): void {
   const panel = root.querySelector<HTMLElement>('.tab-panel:not([hidden])')!;
@@ -163,8 +174,9 @@ describe('默认配置', () => {
   it('副词条下拉里不会出现当前主词条（哪怕权重是 0）', () => {
     const root = freshRoot();
     mount(root);
-    for (const attr of ['大攻击', '暴击', '暴伤', '爆伤']) {
-      setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, attr);
+    // 部位与主词条必须搭配合法：暴击/爆伤只在头，大攻击三处都有
+    for (const attr of ['大攻击', '暴击', '爆伤']) {
+      pickSlotAndMain(root, '头', attr);
       const expected = attr === '爆伤' ? '暴伤' : attr;
       for (const sel of attrSelects(root)) {
         const values = [...sel.options].map((o) => o.value);
@@ -503,12 +515,13 @@ describe('主 tab 与子 tab', () => {
     expect(cardValues(root)[3]).not.toBe('50.7');
   });
 
-  it('两个 tab 共用同一份评分标准', () => {
+  it('两个 tab 共用同一份评分标准（含部位）', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, '暴击');
+    pickSlotAndMain(root, '头', '暴击');
     clickTab(root, 'growth');
+    expect(root.querySelector<HTMLSelectElement>('#slot')!.value).toBe('头');
     expect(root.querySelector<HTMLSelectElement>('#mainAttr')!.value).toBe('暴击');
     expect(attrSelects(root).map((s) => s.value)).not.toContain('暴击');
   });
@@ -610,7 +623,7 @@ describe('得分分布页', () => {
     expect(card.querySelector('.card-label')!.textContent).toBe(C.CARD_DROP);
     // 火伤主词条 + 要暴击暴伤
     expect(Number((card.querySelector('.card-value')!.textContent ?? '').replace('%', ''))).toBeGreaterThan(0);
-    expect(card.querySelector('.card-note')!.textContent).toContain('部位 1/5');
+    expect(card.querySelector('.card-note')!.textContent).toContain('主词条');
   });
 
   it('掉落概率随要求的副词条增多而下降', () => {
@@ -626,12 +639,25 @@ describe('得分分布页', () => {
     expect(three).toBeLessThan(two);
   });
 
-  it('主词条与副词条冲突时掉落概率为 0（不可能的事件）', () => {
+  it('掉落概率 = 主词条概率 × 副词条概率', () => {
     const root = freshRoot();
     mount(root);
-    // 主词条改成暴击 → 原本要求的暴击副词条被剔掉，只剩暴伤，仍然 > 0
-    setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, '暴击');
+    // 空之杯主词条火伤 = 200/4000 = 5%
+    const card = root.querySelector('.tab-panel:not([hidden]) .card')!;
+    expect(card.querySelector('.card-note')!.textContent).toContain('主词条 5.00%');
+  });
+
+  it('切到花 / 羽时主词条固定，且主词条概率为 1', () => {
+    const root = freshRoot();
+    mount(root);
+    setSelect(root.querySelector<HTMLSelectElement>('#slot')!, '花');
+    const sel = root.querySelector<HTMLSelectElement>('#mainAttr')!;
+    expect(sel.disabled).toBe(true);
+    // 主词条固定 → 只剩下副词条的约束，概率不再是 0
     expect(cardValues(root)[0]).not.toBe('0%');
+    expect(root.querySelector('.tab-panel:not([hidden]) .card-note')!.textContent).toContain(
+      '主词条 100.00%',
+    );
   });
 
   it('主词条火伤、暴击2暴伤1 时最高分是 55.4', () => {
@@ -713,12 +739,14 @@ describe('配置序列化', () => {
     expect(fromQuery('?main=不存在').mainAttr).toBe(s.mainAttr);
     expect(fromQuery('').mainAttr).toBe(s.mainAttr);
     expect(fromQuery('?slots=a:1').mainAttr).toBe(s.mainAttr);
-    expect(fromQuery('?main=暴击&slots=暴击:2,xx:1,yy:1,zz:1').slots[1]!.attr).toBe('');
+    expect(fromQuery('?slot=头&main=暴击&slots=暴击:2,xx:1,yy:1,zz:1').slots[1]!.attr).toBe('');
+    // 主词条与部位不搭时回落到该部位的合法主词条
+    expect(fromQuery('?slot=沙&main=火伤&slots=暴击:2,暴伤:1,:0,:0').mainAttr).not.toBe('火伤');
   });
 
   it('query 里主词条与副词条冲突时，界面上会清掉冲突项', () => {
     resetUrl(
-      `?main=${encodeURIComponent('暴击')}&slots=${encodeURIComponent('暴击:2,暴伤:1,大攻击:1,充能:1')}`,
+      `?slot=${encodeURIComponent('头')}&main=${encodeURIComponent('暴击')}&slots=${encodeURIComponent('暴击:2,暴伤:1,大攻击:1,充能:1')}`,
     );
     const el = freshRoot();
     mount(el);

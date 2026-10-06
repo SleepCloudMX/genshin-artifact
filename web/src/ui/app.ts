@@ -24,7 +24,16 @@
  * 全部数学都在 `src/core/`，界面只负责收集输入与展示结果。
  */
 
-import { MAIN_ATTRS, type MainAttr, type SubAttr } from '../core/stats';
+import {
+  SLOTS,
+  SLOT_NAMES,
+  SUB_ATTRS,
+  excludedAt,
+  mainAttrsOf,
+  type MainAttr,
+  type Slot as ArtifactSlot,
+  type SubAttr,
+} from '../core/stats';
 import {
   scoreDistribution,
   pmfByHit,
@@ -291,18 +300,70 @@ export function mount(root: HTMLElement): void {
   // 共享控件
   // -------------------------------------------------------------------------
 
-  function mainAttrField(): HTMLElement {
+  /** 主词条下拉：可选项由**部位**限定（火伤只有杯能出） */
+  function mainAttrField(): { box: HTMLElement; sync(): void } {
     const sel = node('select', { id: 'mainAttr' });
-    for (const a of MAIN_ATTRS) sel.append(option(a, a, a === state.mainAttr));
-    sel.value = state.mainAttr;
+    let bound: ArtifactSlot | null = null;
+
     sel.addEventListener('change', () => {
+      if (sel.disabled) return;
       const mainAttr = sel.value as MainAttr;
+      const excluded = excludedAt(state.slot, mainAttr);
       const slots = state.slots.map((s) =>
-        isExcludedByMain(mainAttr, s.attr) ? { ...s, attr: '' as const, weight: 0 } : { ...s },
+        s.attr !== '' && s.attr === excluded ? { ...s, attr: '' as const, weight: 0 } : { ...s },
       ) as AppState['slots'];
       setState({ mainAttr, slots });
     });
-    return field(C.FIELD_MAIN, sel);
+
+    function sync(): void {
+      const mains = mainAttrsOf(state.slot);
+      // 选项只跟部位有关；部位没变就不用重建，避免打断用户正在操作的下拉
+      if (bound !== state.slot) {
+        bound = state.slot;
+        sel.replaceChildren();
+        if (mains.length === 0) {
+          // 花 / 羽的主词条固定，没有可选的
+          sel.append(option(state.mainAttr, state.mainAttr, true));
+          sel.disabled = true;
+          sel.title = C.MAIN_FIXED_HINT;
+        } else {
+          sel.disabled = false;
+          sel.removeAttribute('title');
+          for (const a of mains) sel.append(option(a, a, a === state.mainAttr));
+        }
+      }
+      sel.value = mains.length === 0 || mains.includes(state.mainAttr) ? state.mainAttr : mains[0]!;
+    }
+
+    sync();
+    return { box: field(C.FIELD_MAIN, sel), sync };
+  }
+
+  /** 部位下拉：决定主词条的可选项，也决定主词条概率 */
+  function slotField(): { box: HTMLElement; sync(): void } {
+    const sel = node('select', { id: 'slot' });
+    for (const s of SLOTS) sel.append(option(s, SLOT_NAMES[s], s === state.slot));
+    sel.value = state.slot;
+
+    sel.addEventListener('change', () => {
+      const slot = sel.value as ArtifactSlot;
+      const mains = mainAttrsOf(slot);
+      // 换部位后原主词条可能不合法 → 落到该部位权重最高的那个
+      const mainAttr =
+        mains.length === 0 || mains.includes(state.mainAttr) ? state.mainAttr : mains[0]!;
+      const excluded = excludedAt(slot, mainAttr);
+      const slots = state.slots.map((s) =>
+        s.attr !== '' && s.attr === excluded ? { ...s, attr: '' as const, weight: 0 } : { ...s },
+      ) as AppState['slots'];
+      setState({ slot, mainAttr, slots });
+    });
+
+    return {
+      box: field(C.FIELD_SLOT, sel),
+      sync() {
+        sel.value = state.slot;
+      },
+    };
   }
 
   /**
@@ -475,27 +536,74 @@ export function mount(root: HTMLElement): void {
     };
   }
 
-  function initialField(): HTMLElement {
+  interface Control {
+    box: HTMLElement;
+    /** 把 state 同步到既有节点上（**不重建**，避免夺走输入焦点） */
+    sync(): void;
+  }
+
+  function initialField(): Control {
     const sel = node('select', { id: 'initialVisible' });
     sel.append(option('4', '4 词条', state.initialVisible === 4));
     sel.append(option('3', '3 词条', state.initialVisible === 3));
-    sel.value = String(state.initialVisible);
     sel.addEventListener('change', () => {
       setState({ initialVisible: Number(sel.value) === 3 ? 3 : 4 });
     });
-    return field(C.FIELD_INITIAL, sel);
+    return {
+      box: field(C.FIELD_INITIAL, sel),
+      sync: () => {
+        sel.value = String(state.initialVisible);
+      },
+    };
   }
 
-  function targetField(): HTMLElement {
+  function targetField(): Control {
     const input = node('input', { id: 'targetScore', type: 'number', step: '0.5', min: '0' });
-    input.value = String(state.targetScore);
     input.addEventListener('input', () => {
       const v = Number(input.value);
       if (Number.isFinite(v) && v >= 0) setState({ targetScore: v });
     });
-    return field(C.FIELD_TARGET, input);
+    return {
+      box: field(C.FIELD_TARGET, input),
+      sync: () => {
+        // 正在输入时不要覆盖用户手上的值（否则光标会跳）
+        if (document.activeElement !== input) input.value = String(state.targetScore);
+      },
+    };
   }
 
+  /**
+   * 左下角的成长值表：列出**当前参与计分的词条**的四个成长档位。
+   *
+   * 这些数字是游戏里四舍五入过的，与官方实际使用的值可能有出入；
+   * 摆在界面上是为了让「分数是怎么来的」可核对，而不是藏在代码里。
+   * 只列用到的词条，不把整张表糊上去。
+   */
+  function growthTableField(): { box: HTMLElement; refresh(): void } {
+    const box = node('div', { class: 'panel growth-table' });
+    box.append(node('h2', {}, C.GROWTH_TABLE_TITLE));
+    box.append(node('p', { class: 'hint' }, C.GROWTH_TABLE_HINT));
+    const t = dataTable([C.TH_GROWTH_ATTR, ...C.TH_GROWTH_TIERS]);
+    box.append(t.table);
+
+    return {
+      box,
+      refresh() {
+        const weights = weightMap(state);
+        // 按计分权重降序：常用的排在上面
+        const attrs = SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0).sort(
+          (a, b) => (weights[b] ?? 0) - (weights[a] ?? 0),
+        );
+        if (attrs.length === 0) {
+          t.body.replaceChildren(row([C.GROWTH_TABLE_EMPTY, '—', '—', '—', '—']));
+          return;
+        }
+        t.body.replaceChildren(
+          ...attrs.map((a) => row([a, ...[0, 1, 2, 3].map((tier) => tierLabel(a, tier))])),
+        );
+      },
+    };
+  }
   /** 面板标题行：左标题、右操作（目前只有「重置」） */
   function panelHead(title: string, actions: HTMLElement[]): HTMLElement {
     const head = node('div', { class: 'panel-head' });
@@ -529,15 +637,28 @@ export function mount(root: HTMLElement): void {
       form.addEventListener('submit', (ev) => ev.preventDefault());
       form.append(panelHead(C.CONFIG, [resetBtn]));
 
-      // 主词条与初始词条数并排一行
-      const pair = node('div', { class: 'field-pair' });
-      pair.append(mainAttrField(), initialField());
+      // 第一行三个框：部位 / 主词条 / 初始词条数
+      const slot = slotField();
+      const main = mainAttrField();
+      const initial = initialField();
+      const pair = node('div', { class: 'field-trio' });
+      pair.append(slot.box, main.box, initial.box);
       form.append(pair);
 
       const slots = slotsField(true);
-      form.append(slots.box, targetField());
-      host.append(form);
-      this.syncControls = () => slots.refresh();
+      const target = targetField();
+      form.append(slots.box, target.box);
+
+      const growth = growthTableField();
+      host.append(form, growth.box);
+      this.syncControls = () => {
+        slot.sync();
+        main.sync();
+        initial.sync();
+        slots.refresh();
+        target.sync();
+        growth.refresh();
+      };
     },
 
     mount(host, tabCtx) {
@@ -685,7 +806,7 @@ export function mount(root: HTMLElement): void {
         const best = table.scores[table.scores.length - 1] ?? 0;
 
         // 掉落概率：不含成长值，只回答「能不能刷到这件胚子」
-        const drop = dropProbability({ mainAttr: state.mainAttr, weights: weightMap(state) });
+        const drop = dropProbability({ mainAttr: state.mainAttr, weights: weightMap(state) }, state.slot);
         const dropNote =
           drop.p > 0
             ? C.dropBreakdown(pct(drop.mainP), pct(drop.subsP))
@@ -714,13 +835,18 @@ export function mount(root: HTMLElement): void {
     controls(host) {
       const form = node('form', { class: 'panel sticky', id: 'form' });
       form.addEventListener('submit', (ev) => ev.preventDefault());
-      form.append(panelHead(C.CONFIG, [resetBtn]));
-      form.append(mainAttrField());
+      const slot = slotField();
+      const main = mainAttrField();
+      form.append(panelHead(C.CONFIG, [resetBtn]), slot.box, main.box);
 
       const slots = slotsField(false);
       form.append(slots.box);
       host.append(form);
-      this.syncControls = () => slots.refresh();
+      this.syncControls = () => {
+        slot.sync();
+        main.sync();
+        slots.refresh();
+      };
     },
 
     mount(host, tabCtx) {

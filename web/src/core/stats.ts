@@ -1,8 +1,36 @@
-/** 词条枚举与权重表。数值取自归档实现（src/artifact_growth/），勿随意改动。 */
+/** 词条枚举与权重表。数值取自归档实现（`docs/ai-ref/v1/init_stats.py`），勿随意改动。 */
 
-/** 部位 */
+/**
+ * 圣遗物的五个部位。
+ *
+ * 前两个（生之花 / 死之羽）**主词条固定**（生命值 / 攻击力），没有随机性，
+ * 所以没有主词条概率表；能随机主词条的是后三个。界面上的「部位」下拉按这套写。
+ */
+export const SLOTS = ['花', '羽', '沙', '杯', '头'] as const;
+export type Slot = (typeof SLOTS)[number];
+
+/** 部位全名，界面用 */
+export const SLOT_NAMES: Record<Slot, string> = {
+  花: '生之花',
+  羽: '死之羽',
+  沙: '时之沙',
+  杯: '空之杯',
+  头: '理之冠',
+};
+
+/**
+ * **主词条可随机**的部位。
+ *
+ * 花与羽的主词条是固定的，不需要概率表，所以 `MAIN_WEIGHTS` 的键只有这三项。
+ * 这个名字保留下来是因为归档与前端一直这么叫。
+ */
 export const POSITIONS = ['沙', '杯', '头'] as const;
 export type Position = (typeof POSITIONS)[number];
+
+/** 该部位的主词条是否随机（花 / 羽固定） */
+export function hasRandomMain(slot: Slot): slot is Position {
+  return (POSITIONS as readonly string[]).includes(slot);
+}
 
 /** 副词条：与主词条同类，可以成为主词条 */
 export const SUB_ATTRS = [
@@ -130,30 +158,32 @@ export function mainAttrsByPosition(): { position: Position; attr: MainAttr; p: 
 }
 
 /**
- * 给定主词条时，该主词条的掉落概率。
+ * 给定部位时的主词条概率；不合法的组合返回 `undefined`。
  *
- * 「掉落时主词条正好是 X」= `P(掉到能出 X 的某个部位) × P(X | 部位)`。
- * 元素伤害/物伤/治疗只在杯上（`POSITION_PROBABILITY × 1/10`），
- * 大攻击则在沙/杯/头都有可能，三处相加。
+ * 「空之杯出火伤」= 200/4000 = **5%**。注意这是**条件概率**（前提是已经掉到了杯），
+ * 不要再乘「掉到杯」的概率——部位是刷本时的既定前提，不是随机项。
  */
-export function mainAttrProbability(mainAttr: MainAttr): number | undefined {
-  const hits = mainAttrsByPosition().filter((e) => e.attr === mainAttr);
-  if (hits.length === 0) return undefined;
-  return hits.reduce((s, e) => s + e.p, 0) * POSITION_PROBABILITY;
+export function mainProbAt(position: Position, mainAttr: MainAttr): number | undefined {
+  const weights = MAIN_WEIGHTS[position];
+  const w = weights[mainAttr];
+  if (w === undefined) return undefined;
+  const total = Object.values(weights).reduce<number>((s, v) => s + (v ?? 0), 0);
+  return w / total;
 }
 
-/**
- * 一次掉落里，圣遗物落到**指定部位**的概率。
- *
- * 注意别和 `POSITIONS.length` 混了：`POSITIONS` 只有沙/杯/头三种**类型**
- * （花与羽没有主词条、也没有副词条随机性，不在本项目的模型里），
- * 而一套五星圣遗物有 5 个部位，掉到其中某一个特定部位是 1/5。
- */
-export const POSITION_PROBABILITY = 1 / 5;
+/** 该部位可选的主词条（按权重降序）。花 / 羽的主词条固定，返回空数组 */
+export function mainAttrsOf(slot: Slot): MainAttr[] {
+  if (!hasRandomMain(slot)) return [];
+  return Object.entries(MAIN_WEIGHTS[slot])
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+    .map(([attr]) => attr as MainAttr);
+}
 
-/** 给定主词条后，它**可能出现的部位**（火伤只会在杯上） */
-export function positionsOf(mainAttr: MainAttr): Position[] {
-  return POSITIONS.filter((p) => MAIN_WEIGHTS[p][mainAttr] !== undefined);
+/** 给定部位时，哪些副词条不能出现（主词条自己） */
+export function excludedAt(slot: Slot, mainAttr: MainAttr): SubAttr | undefined {
+  // 花 / 羽的主词条是生命值 / 攻击力这种固定值，与副词条池不冲突
+  if (!hasRandomMain(slot)) return undefined;
+  return excludedSubstat(mainAttr);
 }
 
 /** 给定主词条后的可用副词条池（权重表） */

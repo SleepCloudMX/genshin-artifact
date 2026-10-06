@@ -11,10 +11,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  SLOTS,
   SUB_ATTRS,
-  POSITION_PROBABILITY,
-  mainAttrProbability,
-  positionsOf,
+  hasRandomMain,
+  mainAttrsOf,
+  mainProbAt,
   type MainAttr,
   type SubAttr,
 } from '../src/core/stats';
@@ -313,61 +314,103 @@ describe('派生指标', () => {
 // ---------------------------------------------------------------------------
 // 掉落概率（不含成长值）
 // ---------------------------------------------------------------------------
+describe('部位与主词条', () => {
+  it('五个部位，花与羽的主词条固定', () => {
+    expect(SLOTS).toEqual(['花', '羽', '沙', '杯', '头']);
+    expect(hasRandomMain('花')).toBe(false);
+    expect(hasRandomMain('羽')).toBe(false);
+    expect(hasRandomMain('沙')).toBe(true);
+    expect(mainAttrsOf('花')).toEqual([]);
+    expect(mainAttrsOf('羽')).toEqual([]);
+  });
+
+  it('主词条可选项按部位限定', () => {
+    // 元素伤害只在杯上
+    expect(mainAttrsOf('杯')).toContain('火伤');
+    expect(mainAttrsOf('杯')).not.toContain('充能');
+    // 充能只在沙上
+    expect(mainAttrsOf('沙')).toContain('充能');
+    expect(mainAttrsOf('沙')).not.toContain('火伤');
+    // 暴击只在头上（杯里没有暴击）
+    expect(mainAttrsOf('头')).toContain('暴击');
+    expect(mainAttrsOf('杯')).not.toContain('暴击');
+    // 大攻击三处都能出
+    for (const pos of ['沙', '杯', '头'] as const) expect(mainAttrsOf(pos)).toContain('大攻击');
+  });
+
+  it('空之杯出火伤 = 200/4000 = 5%（条件概率，不含「掉到杯」）', () => {
+    expect(mainProbAt('杯', '火伤')).toBeCloseTo(200 / 4000, 12);
+    expect(mainProbAt('杯', '火伤')).toBeCloseTo(0.05, 12);
+  });
+
+  it('主词条概率按部位归一，各部位和为 1', () => {
+    for (const pos of ['沙', '杯', '头'] as const) {
+      const sum = mainAttrsOf(pos).reduce((s, a) => s + (mainProbAt(pos, a) ?? 0), 0);
+      expect(sum, `${pos} 的主词条概率和`).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('该部位没有的主词条返回 undefined', () => {
+    expect(mainProbAt('沙', '火伤')).toBeUndefined();
+    expect(mainProbAt('头', '充能')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 掉落概率（不含成长值）
+// ---------------------------------------------------------------------------
 describe('掉落概率', () => {
-  it('部位概率是 1/5，主词条概率按部位取（火伤只在杯上）', () => {
-    // 一套五星圣遗物有 5 个部位，掉到指定部位（如杯）是 1/5；
-    // 别和 POSITIONS.length（3 种有主词条的类型）混了
-    expect(POSITION_PROBABILITY).toBeCloseTo(0.2, 12);
-    expect(positionsOf('火伤')).toEqual(['杯']);
-    expect(mainAttrProbability('火伤')).toBeCloseTo(0.2 * (200 / 4000), 12);
+  it('部位不参与相乘 —— 它是刷本的既定前提，不是随机项', () => {
+    const d = dropProbability({ mainAttr: '火伤', weights: {} }, '杯');
+    expect(d.mainP).toBeCloseTo(0.05, 12);
+    expect(d.p).toBeCloseTo(0.05, 12);
   });
 
-  it('暴击可以是头的主词条，概率按部位取平均', () => {
-    expect(positionsOf('暴击')).toContain('头');
-    // 头：5/50；暴击不是杯的主词条 → 平均只有头那一项 / 5
-    expect(mainAttrProbability('暴击')).toBeCloseTo(0.2 * (5 / 50), 12);
-  });
-
-  it('不要副词条时只剩「部位 × 主词条」', () => {
-    const d = dropProbability({ mainAttr: '火伤', weights: {} });
-    expect(d.subsP).toBe(1);
-    expect(d.p).toBeCloseTo(d.mainP, 12);
-    expect(d.p).toBeCloseTo(0.2 * (200 / 4000), 12);
+  it('花 / 羽的主词条固定，主词条概率为 1', () => {
+    for (const slot of ['花', '羽'] as const) {
+      const d = dropProbability({ mainAttr: '火伤', weights: {} }, slot);
+      expect(d.mainP, `${slot} 的主词条概率`).toBe(1);
+    }
   });
 
   it('要暴击 + 暴伤时，副词条概率就是「同时含有这两条」', () => {
-    const d = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } });
+    const d = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } }, '杯');
     expect(d.subsP).toBeCloseTo(attrsProb('火伤', ['暴击', '暴伤']), 12);
     expect(d.subsP).toBeLessThan(1);
     expect(d.p).toBeCloseTo(d.mainP * d.subsP, 12);
   });
 
   it('要求越多副词条，概率越小', () => {
-    const one = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } });
-    const two = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } });
-    const three = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1, 充能: 1 } });
+    const one = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } }, '杯');
+    const two = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } }, '杯');
+    const three = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1, 充能: 1 } }, '杯');
     expect(two.p).toBeLessThan(one.p);
     expect(three.p).toBeLessThan(two.p);
   });
 
   it('要求 5 条副词条时概率为 0（终态只有 4 条）', () => {
-    const d = dropProbability({
-      mainAttr: '火伤',
-      weights: { 暴击: 2, 暴伤: 1, 充能: 1, 大攻击: 1, 精通: 1 },
-    });
+    const d = dropProbability(
+      { mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1, 充能: 1, 大攻击: 1, 精通: 1 } },
+      '杯',
+    );
     expect(d.subsP).toBe(0);
     expect(d.p).toBe(0);
   });
 
   it('权重为 0 的词条不参与约束（「不计分」= 通配）', () => {
-    const a = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 充能: 0 } });
-    const b = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } });
+    const a = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 充能: 0 } }, '杯');
+    const b = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } }, '杯');
     expect(a.p).toBeCloseTo(b.p, 12);
   });
 
-  it('主词条会从副词条池里排除，所以不能把它自己算成约束', () => {
-    // 暴击当主词条时，「要暴击副词条」的概率是 0（游戏里不可能）
-    expect(dropProbability({ mainAttr: '暴击', weights: { 暴击: 2 } }).subsP).toBe(0);
+  it('要求的词条全被主词条冲突剔掉时是 0（不可能事件）', () => {
+    // 暴击当主词条时，「要暴击副词条」游戏里不可能
+    expect(dropProbability({ mainAttr: '暴击', weights: { 暴击: 2 } }, '头').subsP).toBe(0);
+  });
+
+  it('主词条别名要规范化：爆伤主词条也要挡掉「暴伤」副词条', () => {
+    const d = dropProbability({ mainAttr: '爆伤', weights: { 暴伤: 1 } }, '头');
+    expect(d.subsP).toBe(0);
   });
 });
 
