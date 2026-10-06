@@ -328,17 +328,22 @@ describe('浮框', () => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 100 100');
     document.body.append(svg);
-    tooltip.showAt(svg, 10, 10, {
-      title: '14.6 分',
-      subtitle: '恰好等于该分数的概率 2.31%',
-      rows: [{ label: '命中 3 次', value: '1.20%', color: '#3b82f6' }],
-      footer: '第 1 / 100 个可能分数',
-    });
+    tooltip.show(
+      {
+        title: '14.6 分',
+        badge: '2.31%',
+        subtitle: '恰好等于该分数的概率 2.31%',
+        rows: [{ label: '命中 3 次', value: '1.20%', color: '#3b82f6' }],
+        footer: '第 1 / 100 个可能分数',
+      },
+      { clientX: 10, clientY: 10 },
+    );
 
     const node = host.querySelector('.tooltip')!;
     expect(node).not.toBeNull();
     expect((node as HTMLElement).hidden).toBe(false);
     expect(node.querySelector('.tt-title')?.textContent).toBe('14.6 分');
+    expect(node.querySelector('.tt-badge')?.textContent).toBe('2.31%');
     expect(node.querySelector('.tt-sub')?.textContent).toContain('2.31%');
     expect(node.querySelectorAll('.tt-row')).toHaveLength(1);
     expect(node.querySelector('.tt-foot')?.textContent).toContain('第 1 / 100');
@@ -348,10 +353,7 @@ describe('浮框', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 100 100');
-    document.body.append(svg);
-    tooltip.showAt(svg, 0, 0, { title: 'x', rows: [] });
+    tooltip.show({ title: 'x', rows: [] }, { clientX: 0, clientY: 0 });
     tooltip.hide();
     expect((host.querySelector('.tooltip') as HTMLElement).hidden).toBe(true);
   });

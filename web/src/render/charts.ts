@@ -380,22 +380,18 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
       fill: 'transparent',
       class: 'hot-rect',
     });
-    hit.addEventListener('mouseenter', () => {
+    hit.addEventListener('mouseenter', (ev) => {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      // 浮框：**横向跟着数据点、竖直固定在绘图区顶部**。
-      //
-      // 竖直不能跟柱顶走：柱子高低不同，鼠标横划时浮框会上下乱飞。
-      // 也不能跟鼠标走：那样浮框与竖线、数据点就是两套位置（作者截图指出过）。
-      // 固定在顶部两个毛病都没有：横向始终对齐竖线，纵向纹丝不动。
-      tooltip.showAt(
-        f.svg,
-        x + f.marginLeft,
-        f.marginTop,
-        scoreTooltip(d, totals[i]!, hitLabels, i, data.length),
-      );
+      // 浮框**跟光标**：这是界面上的标准行为，不要改成锚数据点 ——
+      // 「交互点与光标不一致」是命中测试的问题（见上面的热区注释），与浮框位置无关。
+      tooltip.show(scoreTooltip(d, totals[i]!, hitLabels, i, data.length), {
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+      });
     });
+    hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
       tooltip.hide();
@@ -531,7 +527,7 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   const dot = el('circle', { class: 'hover-dot', r: 4.5, cx: -99, cy: -99 });
   f.plot.append(guide, dot);
 
-  const paint = (i: number): void => {
+  const paint = (i: number, ev: { clientX: number; clientY: number }): void => {
     const x = xOf(i);
     const y = yOf(survival[i]!);
     guide.setAttribute('x1', String(x));
@@ -540,11 +536,7 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     dot.setAttribute('cx', String(x));
     dot.setAttribute('cy', String(y));
     dot.classList.add('on');
-    // 浮框锚在**曲线上的那个点**，和竖线、高亮点是同一个位置
-    tooltip.showAt(
-      f.svg,
-      x + f.marginLeft,
-      y + f.marginTop,
+    tooltip.show(
       {
         title: `${scores[i]!.toFixed(1)} 分及以上`,
         subtitle: `P(得分 ≥ ${scores[i]!.toFixed(1)})`,
@@ -557,8 +549,7 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
         ],
         footer: '曲线越靠右越低，说明高分越稀有',
       },
-      // 锚点靠右时把浮框翻到左边，免得跑出图表
-      x > f.plotW * 0.6 ? 'left' : 'right',
+      { clientX: ev.clientX, clientY: ev.clientY },
     );
   };
 
@@ -572,7 +563,8 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
       fill: 'transparent',
       class: 'hot-rect',
     });
-    col.addEventListener('mouseenter', () => paint(i));
+    col.addEventListener('mouseenter', (ev) => paint(i, ev));
+    col.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     col.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
       dot.classList.remove('on');
@@ -681,15 +673,11 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       fill: 'transparent',
       class: 'hot-rect',
     });
-    hit.addEventListener('mouseenter', () => {
+    hit.addEventListener('mouseenter', (ev) => {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      // 浮框横向跟柱子、竖直固定在顶部（理由同堆叠柱：跟柱顶会上下乱飞）
-      tooltip.showAt(
-        f.svg,
-        x + f.marginLeft,
-        f.marginTop,
+      tooltip.show(
         {
           title: d.label,
           rows: [
@@ -697,9 +685,10 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
             ...(d.note ? [{ label: '说明', value: d.note }] : []),
           ],
         },
-        'right',
+        { clientX: ev.clientX, clientY: ev.clientY },
       );
     });
+    hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
       tooltip.hide();

@@ -82,22 +82,19 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
     path.setAttribute('data-slice', String(i));
 
     const label = d.label.length > 22 ? `${d.label.slice(0, 21)}…` : d.label;
-    // 环形图没有「竖线 / 高亮点」这类锚点，就锚在扇区的**角平分线中点**上：
-    // 这样浮框总是从它所描述的那一块长出来，而不是跟着鼠标乱跑
-    const mid = (from + to) / 2;
-    const anchorAngle = (mid * 2 - 0.5) * Math.PI;
-    const anchorR = (R + innerR) / 2;
-    const [ax, ay] = [CX + anchorR * Math.cos(anchorAngle), CY + anchorR * Math.sin(anchorAngle)];
-
-    path.addEventListener('mouseenter', () => {
+    path.addEventListener('mouseenter', (ev) => {
       path.classList.add('on');
-      tooltip.showAt(svg, ax, ay, {
-        title: label,
-        subtitle: `占全部可能组合的 ${pct(d.p / total, 2)}`,
-        rows: [{ label: d.label, value: pct(d.p / total, 2), color: d.color ?? hitColor(i) }],
-        footer: d.note ?? '「其他」是概率过小、被合并的长尾',
-      });
+      tooltip.show(
+        {
+          title: label,
+          subtitle: `占全部可能组合的 ${pct(d.p / total, 2)}`,
+          rows: [{ label: d.label, value: pct(d.p / total, 2), color: d.color ?? hitColor(i) }],
+          footer: d.note ?? '「其他」是概率过小、被合并的长尾',
+        },
+        { clientX: ev.clientX, clientY: ev.clientY },
+      );
     });
+    path.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     path.addEventListener('mouseleave', () => {
       path.classList.remove('on');
       tooltip.hide();

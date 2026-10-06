@@ -29,13 +29,25 @@ export interface TooltipContent {
 
 const GAP = 12;
 const EDGE = 8;
-/** 从锚点往哪个方向摆 */
-export type Side = 'right' | 'left' | 'auto';
+/**
+ * 浮框锚点：**跟光标**（默认）或**跟数据点**。
+ *
+ * - `'cursor'`：中规中矩的悬浮提示，位置随指针走。**这是界面上的默认行为**。
+ *   最初就是这么做的，作者明确要求保持。
+ * - `'data'`：锚在数据点的 viewBox 坐标上。
+ *
+ * 注意：**「交互点与光标不一致」是命中测试的问题**（哪一列被点亮），
+ * 不是浮框位置的问题 —— 别用改浮框位置去治它。见 `charts.ts` 里每列热区的注释。
+ */
+export type Anchor = 'cursor' | 'data';
+
+/** 水平方向往哪边让开 */
+export type Prefer = 'right' | 'left' | 'auto';
 
 export class Tooltip {
   private readonly node: HTMLDivElement;
   private frame = 0;
-  private pending: { x: number; y: number; prefer?: Side } | null = null;
+  private pending: { x: number; y: number; prefer?: Prefer } | null = null;
 
   constructor(private readonly host: HTMLElement) {
     const node = document.createElement('div');
@@ -47,38 +59,44 @@ export class Tooltip {
   }
 
   /**
-   * 在**图表数据点**对应的屏幕位置显示浮框。
+   * 显示浮框。**默认跟光标**（`anchor: 'cursor'`）—— 这是界面上的标准行为。
    *
-   * `svg` 是该图的根节点，`(x, y)` 是相对该 SVG `viewBox` 的坐标。
-   * 之所以要这套换算：浮框必须和竖线、高亮点长在同一个位置上，
-   * 跟着鼠标走会让三者互相错位（用户一眼就能看出来）。
-   *
-   * 摆放规则：默认摆在锚点右侧；右边界放不下就翻到左侧；
-   * 竖直方向以锚点为中心，越界则贴边。`prefer` 可以强制左右。
+   * `anchor: 'data'` 时才用 `(x, y)`（相对该 SVG `viewBox` 的坐标）当锚点。
    */
-  showAt(
-    svg: SVGSVGElement,
-    x: number,
-    y: number,
+  show(
     content: TooltipContent,
-    prefer: Side = 'auto',
+    at: {
+      anchor?: Anchor;
+      clientX: number;
+      clientY: number;
+      /** 仅 nchor: 'data' 时使用 */
+      svg?: SVGSVGElement;
+      x?: number;
+      y?: number;
+      prefer?: Prefer;
+    },
   ): void {
     this.node.replaceChildren(build(content));
     this.node.hidden = false;
 
-    const box = svg.getBoundingClientRect();
-    const scale = box.width > 0 ? box.width / (svg.viewBox.baseVal.width || box.width) : 1;
-    const left = box.left + x * scale;
-    const top = box.top + y * scale;
-    // 先量一次浮框尺寸，再决定翻不翻转（`place` 里还要按实际尺寸夹一次边）
-    const size = this.node.getBoundingClientRect();
-    const wantLeft = prefer === 'left' || (prefer === 'auto' && left + GAP + size.width > window.innerWidth - EDGE);
+    const prefer = at.prefer ?? 'auto';
+    if (at.anchor === 'data' && at.x !== undefined && at.y !== undefined && at.svg) {
+      const box = at.svg.getBoundingClientRect();
+      const scale = box.width > 0 ? box.width / (at.svg.viewBox.baseVal.width || box.width) : 1;
+      const left = box.left + at.x * scale;
+      const top = box.top + at.y * scale;
+      const size = this.node.getBoundingClientRect();
+      const wantLeft =
+        prefer === 'left' || (prefer === 'auto' && left + GAP + size.width > window.innerWidth - EDGE);
+      this.move(wantLeft ? left - GAP : left + GAP, top, wantLeft ? 'left' : 'right');
+      return;
+    }
 
-    this.move(wantLeft ? left - GAP : left + GAP, top, wantLeft ? 'left' : 'right');
+    this.move(at.clientX + GAP, at.clientY + GAP, prefer);
   }
 
   /** 更新位置；同一帧内多次调用只会重排一次 */
-  move(clientX: number, clientY: number, prefer: Side = 'auto'): void {
+  move(clientX: number, clientY: number, prefer: Prefer = 'auto'): void {
     this.pending = { x: clientX, y: clientY, prefer };
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
@@ -104,11 +122,11 @@ export class Tooltip {
   }
 
   /**
-   * `clientX/clientY` 既是「浮框的锚点」也是「摆放的参考点」：
-   * 水平方向按 `prefer` 决定往左还是往右让开，竖直方向以它为中线。
-   * 这样调用方只要给出数据点的屏幕坐标，不必关心浮框多大。
+   * `clientX/clientY` 是**摆放的参考点**（对 `cursor` 锚点来说就是光标位置，
+   * 且调用方已经加好让开的间距）。水平按 `prefer` 决定以它左边缘还是右边缘对齐，
+   * 竖直以它为中线，越界贴边。
    */
-  private place(clientX: number, clientY: number, prefer: Side): void {
+  private place(clientX: number, clientY: number, prefer: Prefer): void {
     const box = this.node.getBoundingClientRect();
     const goLeft = prefer === 'left';
     let left = goLeft ? clientX - box.width : clientX;
