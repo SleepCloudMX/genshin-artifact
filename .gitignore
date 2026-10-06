@@ -4,9 +4,17 @@
 
 __pycache__/
 
+# 运行期产物（输出、临时文件），不入库
 output/
 temp/
 
-# 前端
+# 前端依赖与构建中间产物
 node_modules/
 web/dist/
+assets/
+.vite/
+
+# 入库的产物只有根 index.html（自包含单文件，是交付物）。
+# assets/ 曾经每次构建留两个没人引用的哈希文件，攒到 38 个 / 1.1 MB ——
+# 现在构建不再产出它们（见 docs/ai-output/1-refactor/02-refactor.md §3.15）；
+# 这一行是防止它复发的护栏，不是替代品。
