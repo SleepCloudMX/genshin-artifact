@@ -362,9 +362,39 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
 
   // --- 悬停层放在最后（绘制顺序 = z 序）：
   //     每列一块透明热区，比逐个柱段监听省事，也不会在柱段之间留缝漏掉指针。
-  //     辅助线也画在最上层，否则会被柱子盖住。
+  //     辅助线与概率角标也画在最上层，否则会被柱子盖住。
   const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
   f.plot.append(guide);
+
+  // 悬停柱的概率角标：**固定在绘图区右上角**并高亮。
+  //
+  // 原来这行概率放在浮框的副标题里（「落在这个区间的概率 2.20%」），又长又和分档明细
+  // 抢注意力；改到柱顶右上角又会被**跟着光标的浮框**盖住（实测如此）。
+  // 固定在角落两个问题都没有：位置不随鼠标动、读数稳定，也不与浮框重叠。
+  const badgeText = text('', { class: 'bar-badge-text', x: 0, y: 0, 'text-anchor': 'end' });
+  const badgeBg = el('rect', { class: 'bar-badge-bg', x: 0, y: 0, width: 0, height: 16, rx: 4 });
+  const badge = el('g', { class: 'bar-badge' });
+  badge.append(badgeBg, badgeText);
+  badge.setAttribute('visibility', 'hidden');
+  f.plot.append(badge);
+
+  function showBadge(label: string): void {
+    badgeText.textContent = label;
+    // SVG 没有自适应的气泡，先量一次文字宽度
+    const w = badgeText.getBBox?.().width ?? label.length * 7.5;
+    const h = 16;
+    const boxW = w + 12;
+    const right = f.plotW;
+    // 贴顶端再往下让一格：最高的那根柱子不会被它压住
+    const top = Math.max(f.plotH - h, 0);
+    badgeBg.setAttribute('x', String(right - boxW));
+    badgeBg.setAttribute('y', String(top));
+    badgeBg.setAttribute('width', String(boxW));
+    badgeBg.setAttribute('height', String(h));
+    badgeText.setAttribute('x', String(right - 6));
+    badgeText.setAttribute('y', String(top + h - 4.5));
+    badge.setAttribute('visibility', 'visible');
+  }
 
   data.forEach((d, i) => {
     const x = xOf(i);
@@ -376,15 +406,18 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
       fill: 'transparent',
       class: 'hot-rect',
     });
-    hit.addEventListener('mouseenter', (ev) => {
+    hit.addEventListener('mouseenter', () => {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      tooltip.show(scoreTooltip(d, totals[i]!, hitLabels, i, data.length), ev.clientX, ev.clientY);
+      const label = pct(totals[i]!);
+      showBadge(label);
+      // 浮框锚在**柱顶**（和竖线同一个位置），不跟鼠标 —— 跟鼠标会和竖线错开
+      tooltip.showAt(f.svg, x, yOf(totals[i]!), scoreTooltip(d, totals[i]!, hitLabels, i, data.length), 'right');
     });
-    hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
+      badge.setAttribute('visibility', 'hidden');
       tooltip.hide();
     });
     f.plot.append(hit);
@@ -399,30 +432,44 @@ function scoreTooltip(
   hitLabels: string[],
   i: number,
   count: number,
-): { title: string; subtitle: string; rows: TooltipRow[]; footer: string } {
+): { title: string; rows: TooltipRow[]; footer?: string } {
+  // 只有一根柱子时不必说「占本柱的 100%」——那是废话
+  const only = d.byHit.filter((p) => p > 0).length === 1;
   const rows: TooltipRow[] = [];
   for (let h = d.byHit.length - 1; h >= 0; h--) {
     const p = d.byHit[h]!;
     if (p <= 0) continue;
-    // 条件概率：在「正好落在这根柱子」的前提下，有多少来自命中 h 次
+    const share = total > 0 ? p / total : 0;
     rows.push({
       label: hitLabels[h] ?? `命中 ${h} 次`,
-      value: `${pct(p)}（占本柱的 ${pct(total > 0 ? p / total : 0, 1)}）`,
+      value: only ? pct(p) : `${pct(p)}（占本柱 ${pct(share, 1)}）`,
       color: hitColor(h),
     });
   }
 
   const bucketed = d.range !== undefined && d.range.min !== d.range.max;
   return {
-    title: bucketed ? `${d.range!.min.toFixed(1)} – ${d.range!.max.toFixed(1)} 分` : `${d.score.toFixed(1)} 分`,
-    subtitle: bucketed
-      ? `落在这个区间的概率 ${pct(total)}`
-      : `恰好等于该分数的概率 ${pct(total)}`,
+    title: bucketed ? bucketRangeLabel(d) : `${d.score.toFixed(1)} 分`,
     rows,
+    // 概率已经标在柱子右上角了，这里不再重复；脚注只留给「第几根」
     footer: bucketed
-      ? `第 ${i + 1} / ${count} 根柱子（每根合并了若干分数）`
+      ? `第 ${i + 1} / ${count} 根柱子（每根合并若干分数）`
       : `第 ${i + 1} / ${count} 个可能分数`,
   };
+}
+
+/**
+ * 分桶柱的区间写法，用数学区间：`[10.0, 11.0)`。
+ *
+ * **左闭右开**，否则读的人不知道边界分数算在哪一根柱子上。
+ * 桶宽按「起点 + 分桶宽度」算的是**名义**区间；桶里最后一个分数如果不到名义上界，
+ * 也在括号里标出来，免得把 `[10.0, 10.8)` 读成「到 10.9 都有」。
+ */
+function bucketRangeLabel(d: StackedDatum): string {
+  const min = d.range!.min;
+  const max = d.range!.max;
+  const hi = Math.round((max + 0.1) * 10) / 10;
+  return `[${min.toFixed(1)}, ${hi.toFixed(1)})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,11 +571,8 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   };
 
   let shown = -1;
-  const paint = (i: number, ev: MouseEvent): void => {
-    if (i === shown) {
-      tooltip.move(ev.clientX, ev.clientY);
-      return;
-    }
+  const paint = (i: number): void => {
+    if (i === shown) return;
     shown = i;
     const x = xOf(i);
     const y = yOf(survival[i]!);
@@ -538,7 +582,11 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     dot.setAttribute('cx', String(x));
     dot.setAttribute('cy', String(y));
     dot.classList.add('on');
-    tooltip.show(
+    // 浮框锚在**曲线上的那个点**，和竖线、高亮点是同一个位置
+    tooltip.showAt(
+      f.svg,
+      x,
+      y,
       {
         title: `${scores[i]!.toFixed(1)} 分及以上`,
         subtitle: `P(得分 ≥ ${scores[i]!.toFixed(1)})`,
@@ -551,13 +599,13 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
         ],
         footer: '曲线越靠右越低，说明高分越稀有',
       },
-      ev.clientX,
-      ev.clientY,
+      // 锚点靠右时把浮框翻到左边，免得跑出图表
+      x > f.plotW * 0.6 ? 'left' : 'right',
     );
   };
 
-  overlay.addEventListener('mouseenter', (ev) => paint(pick(ev), ev));
-  overlay.addEventListener('mousemove', (ev) => paint(pick(ev), ev));
+  overlay.addEventListener('mouseenter', (ev) => paint(pick(ev)));
+  overlay.addEventListener('mousemove', (ev) => paint(pick(ev)));
   overlay.addEventListener('mouseleave', () => {
     shown = -1;
     guide.classList.remove('on');
@@ -665,11 +713,15 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       fill: 'transparent',
       class: 'hot-rect',
     });
-    hit.addEventListener('mouseenter', (ev) => {
+    hit.addEventListener('mouseenter', () => {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      tooltip.show(
+      // 浮框锚在**柱顶**，和竖线一致
+      tooltip.showAt(
+        f.svg,
+        x,
+        yOf(d.value),
         {
           title: d.label,
           rows: [
@@ -677,11 +729,9 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
             ...(d.note ? [{ label: '说明', value: d.note }] : []),
           ],
         },
-        ev.clientX,
-        ev.clientY,
+        'right',
       );
     });
-    hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
       tooltip.hide();

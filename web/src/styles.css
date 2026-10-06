@@ -422,6 +422,20 @@ svg.chart { display: block; width: 100%; height: auto; }
 }
 .guide.on { opacity: .55; }
 
+/* 悬停柱的概率角标：贴在柱顶，高亮 */
+.bar-badge { pointer-events: none; }
+.bar-badge-bg {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.2;
+}
+.bar-badge-text {
+  fill: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
 .series-line { fill: none; stroke: #2563eb; stroke-width: 2; stroke-linejoin: round; }
 .series-area { fill: rgb(37 99 235 / 10%); stroke: none; }
 :root[data-theme='dark'] .series-line { stroke: #6ea8fe; }

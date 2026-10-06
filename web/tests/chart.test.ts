@@ -114,6 +114,113 @@ describe('得分分布堆叠柱', () => {
     expect(labels.some((l) => l?.includes('累积'))).toBe(false);
   });
 
+  it('悬停柱有概率角标，初始隐藏', () => {
+    const svg = renderScoreBars({
+      data: makeData(10),
+      hitLabels: HIT_LABELS,
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const badge = svg.querySelector('g.bar-badge');
+    expect(badge).not.toBeNull();
+    expect(badge!.getAttribute('visibility')).toBe('hidden');
+    expect(badge!.querySelector('.bar-badge-text')).not.toBeNull();
+  });
+
+  /** 挂一个浮框、渲染图、悬停第 i 根柱子，返回浮框里的文案 */
+  function hoverBar(
+    data: { score: number; range?: { min: number; max: number }; byHit: number[] }[],
+    i: number,
+  ): { host: HTMLElement; svg: SVGSVGElement } {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    const svg = renderScoreBars({ data, hitLabels: HIT_LABELS, title: 't', tooltip });
+    host.append(svg);
+    svg
+      .querySelectorAll('rect.hot-rect')
+      [i]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 10, clientY: 10 }));
+    return { host, svg };
+  }
+
+  it('悬停柱有概率角标，初始隐藏、悬停后显示并写概率', () => {
+    const svg = renderScoreBars({
+      data: makeData(10),
+      hitLabels: HIT_LABELS,
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const badge = svg.querySelector('g.bar-badge')!;
+    expect(badge.getAttribute('visibility')).toBe('hidden');
+
+    const { host } = hoverBar(makeData(10), 0);
+    expect(host.querySelector('g.bar-badge')!.getAttribute('visibility')).toBe('visible');
+    expect(host.querySelector('.bar-badge-text')!.textContent).toMatch(/%$/);
+  });
+
+  it('角标固定在绘图区右上角 —— 不跟着柱子走', () => {
+    // 悬停不同的柱子，角标位置必须完全一致（只换文字）
+    const at = (i: number) => {
+      const { host } = hoverBar(makeData(12), i);
+      const bg = host.querySelector('.bar-badge-bg')!;
+      return `${bg.getAttribute('x')},${bg.getAttribute('y')}`;
+    };
+    expect(at(0)).toBe(at(11));
+    expect(at(5)).toBe(at(0));
+
+    // 贴着绘图区右边。角标在 `<g transform="translate(left, top)">` 内，
+    // 所以绝对 x 要算上左边距：右边界 = viewBox 宽 − 右边距 18 − 左边距 52
+    const { host, svg } = hoverBar(makeData(12), 3);
+    const bg = host.querySelector('.bar-badge-bg')!;
+    const viewW = Number(svg.getAttribute('viewBox')!.split(' ')[2]);
+    expect(Number(bg.getAttribute('x')) + Number(bg.getAttribute('width'))).toBeCloseTo(
+      viewW - 18 - 52,
+      0,
+    );
+  });
+
+  it('浮框不再重复写概率（已经标在角标上了）', () => {
+    const { host } = hoverBar(makeData(5), 2);
+    const titles = [...host.querySelectorAll('.tooltip > div')].map((n) => n.textContent ?? '');
+    expect(titles.some((s) => s.includes('概率'))).toBe(false);
+    // 分档明细还在
+    expect(host.querySelectorAll('.tooltip .tt-row').length).toBeGreaterThan(0);
+  });
+
+  it('只有一根柱子时，分档明细不写「占本柱 100%」', () => {
+    const single = hoverBar([{ score: 10.0, byHit: [0, 0, 0.4, 0, 0, 0] }], 0);
+    const multi = hoverBar([{ score: 10.0, byHit: [0.1, 0.3, 0, 0, 0, 0] }], 0);
+    const value = (h: HTMLElement) => h.querySelector('.tooltip .tt-row .tt-value')!.textContent!;
+
+    expect(value(single.host)).not.toContain('占本柱');
+    expect(value(multi.host)).toContain('占本柱');
+  });
+
+  it('分桶柱的悬停标题写成左闭右开区间 [a, b)', () => {
+    const { host } = hoverBar(
+      [
+        { score: 10, range: { min: 10.0, max: 10.9 }, byHit: [0.2, 0.3, 0, 0, 0, 0] },
+        { score: 11, range: { min: 11.0, max: 11.0 }, byHit: [0.1, 0.4, 0, 0, 0, 0] },
+      ],
+      0,
+    );
+    expect(host.querySelector('.tooltip .tt-title')!.textContent).toBe('[10.0, 11.0)');
+    // 末尾那根桶只到 11.0，闭区间写法退化成左闭右开 + 真实上界
+    const { host: h2 } = hoverBar(
+      [
+        { score: 10, range: { min: 10.0, max: 10.9 }, byHit: [0.2, 0.3, 0, 0, 0, 0] },
+        { score: 11, range: { min: 11.0, max: 11.4 }, byHit: [0.1, 0.4, 0, 0, 0, 0] },
+      ],
+      1,
+    );
+    expect(h2.querySelector('.tooltip .tt-title')!.textContent).toBe('[11.0, 11.5)');
+  });
+
+  it('不分桶时标题就是单点分数', () => {
+    const { host } = hoverBar([{ score: 12.5, byHit: [0.2, 0.3, 0, 0, 0, 0] }], 0);
+    expect(host.querySelector('.tooltip .tt-title')!.textContent).toBe('12.5 分');
+  });
+
   it('目标分数处画参考线', () => {
     const withMarker = renderScoreBars({
       data: makeData(30),
@@ -244,16 +351,15 @@ describe('浮框', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
-    tooltip.show(
-      {
-        title: '14.6 分',
-        subtitle: '恰好等于该分数的概率 2.31%',
-        rows: [{ label: '命中 3 次', value: '1.20%', color: '#3b82f6' }],
-        footer: '第 1 / 100 个可能分数',
-      },
-      10,
-      10,
-    );
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    document.body.append(svg);
+    tooltip.showAt(svg, 10, 10, {
+      title: '14.6 分',
+      subtitle: '恰好等于该分数的概率 2.31%',
+      rows: [{ label: '命中 3 次', value: '1.20%', color: '#3b82f6' }],
+      footer: '第 1 / 100 个可能分数',
+    });
 
     const node = host.querySelector('.tooltip')!;
     expect(node).not.toBeNull();
@@ -268,7 +374,10 @@ describe('浮框', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
-    tooltip.show({ title: 'x', rows: [] }, 0, 0);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    document.body.append(svg);
+    tooltip.showAt(svg, 0, 0, { title: 'x', rows: [] });
     tooltip.hide();
     expect((host.querySelector('.tooltip') as HTMLElement).hidden).toBe(true);
   });

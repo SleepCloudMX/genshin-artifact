@@ -25,13 +25,15 @@ export interface TooltipContent {
   footer?: string;
 }
 
-const OFFSET = 14;
+const GAP = 12;
 const EDGE = 8;
+/** 从锚点往哪个方向摆 */
+export type Side = 'right' | 'left' | 'auto';
 
 export class Tooltip {
   private readonly node: HTMLDivElement;
   private frame = 0;
-  private pending: { x: number; y: number } | null = null;
+  private pending: { x: number; y: number; prefer?: Side } | null = null;
 
   constructor(private readonly host: HTMLElement) {
     const node = document.createElement('div');
@@ -42,22 +44,46 @@ export class Tooltip {
     this.node = node;
   }
 
-  /** 在 (x, y) 处显示（坐标相对 `host`，通常直接传鼠标事件的 clientX/Y） */
-  show(content: TooltipContent, x: number, y: number): void {
+  /**
+   * 在**图表数据点**对应的屏幕位置显示浮框。
+   *
+   * `svg` 是该图的根节点，`(x, y)` 是相对该 SVG `viewBox` 的坐标。
+   * 之所以要这套换算：浮框必须和竖线、高亮点长在同一个位置上，
+   * 跟着鼠标走会让三者互相错位（用户一眼就能看出来）。
+   *
+   * 摆放规则：默认摆在锚点右侧；右边界放不下就翻到左侧；
+   * 竖直方向以锚点为中心，越界则贴边。`prefer` 可以强制左右。
+   */
+  showAt(
+    svg: SVGSVGElement,
+    x: number,
+    y: number,
+    content: TooltipContent,
+    prefer: Side = 'auto',
+  ): void {
     this.node.replaceChildren(build(content));
     this.node.hidden = false;
-    this.move(x, y);
+
+    const box = svg.getBoundingClientRect();
+    const scale = box.width > 0 ? box.width / (svg.viewBox.baseVal.width || box.width) : 1;
+    const left = box.left + x * scale;
+    const top = box.top + y * scale;
+    // 先量一次浮框尺寸，再决定翻不翻转（`place` 里还要按实际尺寸夹一次边）
+    const size = this.node.getBoundingClientRect();
+    const wantLeft = prefer === 'left' || (prefer === 'auto' && left + GAP + size.width > window.innerWidth - EDGE);
+
+    this.move(wantLeft ? left - GAP : left + GAP, top, wantLeft ? 'left' : 'right');
   }
 
   /** 更新位置；同一帧内多次调用只会重排一次 */
-  move(x: number, y: number): void {
-    this.pending = { x, y };
+  move(clientX: number, clientY: number, prefer: Side = 'auto'): void {
+    this.pending = { x: clientX, y: clientY, prefer };
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       const p = this.pending;
       if (!p) return;
-      this.place(p.x, p.y);
+      this.place(p.x, p.y, p.prefer ?? 'auto');
     });
   }
 
@@ -75,19 +101,18 @@ export class Tooltip {
     this.node.remove();
   }
 
-  private place(clientX: number, clientY: number): void {
-    const hostBox = this.host.getBoundingClientRect();
-    // 节点 position: fixed，所以直接用视口坐标，不用再减 hostBox
-    void hostBox;
+  /**
+   * `clientX/clientY` 既是「浮框的锚点」也是「摆放的参考点」：
+   * 水平方向按 `prefer` 决定往左还是往右让开，竖直方向以它为中线。
+   * 这样调用方只要给出数据点的屏幕坐标，不必关心浮框多大。
+   */
+  private place(clientX: number, clientY: number, prefer: Side): void {
     const box = this.node.getBoundingClientRect();
-    let left = clientX + OFFSET;
-    let top = clientY + OFFSET;
+    const goLeft = prefer === 'left';
+    let left = goLeft ? clientX - box.width : clientX;
+    let top = clientY - box.height / 2;
 
-    // 右/下越界就翻到另一侧
-    if (left + box.width > window.innerWidth - EDGE) left = clientX - OFFSET - box.width;
-    if (top + box.height > window.innerHeight - EDGE) top = clientY - OFFSET - box.height;
-
-    // 仍然越界（浮框比视口还大）就贴边
+    // 越界就贴边（浮框比视口还大时也只能贴边）
     left = Math.max(EDGE, Math.min(left, window.innerWidth - box.width - EDGE));
     top = Math.max(EDGE, Math.min(top, window.innerHeight - box.height - EDGE));
 
