@@ -29,6 +29,7 @@ import {
   survival,
   itemDist,
   hitProbabilities,
+  hitMixAtLeast,
   expectedAttempts,
   scoreAtAlpha,
   tierLabel,
@@ -273,6 +274,72 @@ describe('growth 不变量', () => {
       const hp = hitProbabilities(t);
       expect(hp.reduce((s, x) => s + x.p, 0)).toBeCloseTo(1, 12);
       for (let i = 1; i < hp.length; i++) expect(hp[i]!.hits).toBe(hp[i - 1]!.hits + 1);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 「≥ 该分数线」时的命中次数条件分布
+// ---------------------------------------------------------------------------
+describe('hitMixAtLeast（条件分布）', () => {
+  const cases = baseline.growth.map((c) => ({ name: c.name, t: scoreDistribution(specOf(c)) }));
+
+  it('每个分数线处都归一化：Σ = 1，长度 = 命中档数', () => {
+    for (const { name, t } of cases) {
+      const sv = survival(t);
+      for (let i = 0; i < t.scores.length; i++) {
+        const mix = hitMixAtLeast(t, i);
+        expect(mix, name).toHaveLength(t.hitBuckets);
+        if (sv[i]! > 0) {
+          expect(
+            mix.reduce((s, x) => s + x, 0),
+            `${name} @ ${t.scores[i]}`,
+          ).toBeCloseTo(1, 12);
+        }
+      }
+    }
+  });
+
+  it('与「原始权重表按 ≥ 分数线求和再归一化」逐格一致', () => {
+    for (const { t } of cases) {
+      for (let i = 0; i < t.scores.length; i++) {
+        const mix = hitMixAtLeast(t, i);
+        let sum = 0;
+        for (let j = i; j < t.hits.length; j++) for (const w of t.hits[j]!) sum += w;
+        for (let h = 0; h < t.hitBuckets; h++) {
+          let w = 0;
+          for (let j = i; j < t.hits.length; j++) w += t.hits[j]![h]!;
+          expect(mix[h]).toBeCloseTo(sum > 0 ? w / sum : 0, 12);
+        }
+      }
+    }
+  });
+
+  it('最低分处退化为无条件的命中分布（≥ 最低分 = 全部结果）', () => {
+    for (const { t } of cases) {
+      const mix = hitMixAtLeast(t, 0);
+      expect(hitProbabilities(t).length).toBeGreaterThan(0);
+      for (const { hits, p } of hitProbabilities(t)) expect(mix[hits]).toBeCloseTo(p, 12);
+    }
+  });
+
+  it('最高分处只在最高命中档上有质量（那个分数只有一种达成方式）', () => {
+    for (const { name, t } of cases) {
+      const mix = hitMixAtLeast(t, t.scores.length - 1);
+      const top = mix.reduce((best, p, h) => (p > 0 ? h : best), -1);
+      expect(top, name).toBeGreaterThanOrEqual(0);
+      expect(mix[top], name).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('下标越界有确定行为：负数按 0 处理，超出末尾返回全 0', () => {
+    const t = cases[0]!.t;
+    const first = hitMixAtLeast(t, 0);
+    expect(hitMixAtLeast(t, -5)).toEqual(first);
+    for (const i of [t.scores.length, t.scores.length + 99]) {
+      const mix = hitMixAtLeast(t, i);
+      expect(mix).toHaveLength(t.hitBuckets);
+      expect(mix.every((x) => x === 0)).toBe(true);
     }
   });
 });

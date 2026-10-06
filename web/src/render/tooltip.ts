@@ -15,6 +15,24 @@ export interface TooltipRow {
   color?: string;
 }
 
+/**
+ * 浮框内的**横排柱状图**的一行：条长由 `fraction` 决定。
+ *
+ * 用横排而不是竖排，是因为浮框是窄条（`max-width: 300px`），
+ * 竖着画柱状图只能放下两三根；横排一行一根，档数多也不挤。
+ * 颜色沿用图上的命中档配色，看起来是同一个东西。
+ */
+export interface TooltipBar {
+  /** 左侧文字（通常是「命中 2 次」） */
+  label: string;
+  /** 条长比例，0~1（通常是该行的概率） */
+  fraction: number;
+  /** 右侧文字（通常是百分数） */
+  value: string;
+  /** 条的颜色，省略则用主色 */
+  color?: string;
+}
+
 export interface TooltipContent {
   /** 标题（通常是「14.6 分」） */
   title: string;
@@ -23,6 +41,10 @@ export interface TooltipContent {
   /** 副标题，省略则不画 */
   subtitle?: string;
   rows: TooltipRow[];
+  /** 横排柱状图；省略则不画 */
+  bars?: TooltipBar[];
+  /** 柱状图上方的小标题，用来交代这一组条的口径 */
+  barsCaption?: string;
   /** 分隔线之后的补充说明 */
   footer?: string;
 }
@@ -151,6 +173,47 @@ function build(content: TooltipContent): DocumentFragment {
       table.append(line);
     }
     frag.append(table);
+  }
+
+  if (content.bars && content.bars.length > 0) {
+    const chart = document.createElement('div');
+    chart.className = 'tt-chart';
+
+    if (content.barsCaption) {
+      const cap = document.createElement('div');
+      cap.className = 'tt-chart-cap';
+      cap.textContent = content.barsCaption;
+      chart.append(cap);
+    }
+
+    for (const bar of content.bars) {
+      const line = document.createElement('div');
+      line.className = 'tt-bar';
+
+      const label = document.createElement('span');
+      label.className = 'tt-bar-label';
+      label.textContent = bar.label;
+
+      // 条：外层是定宽轨道（`flex: 1`），内层按比例给宽度。
+      // 极小值靠 CSS 的 `min-width` 保底，不在这里做「最小可见宽度」的补偿，
+      // 否则条长就不再等于数值了。
+      const track = document.createElement('span');
+      track.className = 'tt-bar-track';
+      const fill = document.createElement('span');
+      fill.className = 'tt-bar-fill';
+      const fraction = Math.min(Math.max(bar.fraction, 0), 1);
+      fill.style.width = `${fraction * 100}%`;
+      if (bar.color) fill.style.background = bar.color;
+      track.append(fill);
+
+      const value = document.createElement('span');
+      value.className = 'tt-bar-value';
+      value.textContent = bar.value;
+
+      line.append(label, track, value);
+      chart.append(line);
+    }
+    frag.append(chart);
   }
 
   if (content.footer) {

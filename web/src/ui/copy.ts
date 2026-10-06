@@ -147,6 +147,8 @@ export const AXIS_SCORE = '得分（分）';
 export const AXIS_SCORE_LINE = '分数线（分）';
 export const SURVIVAL_TITLE = 'P(得分 ≥ 分数线)';
 export const SURVIVAL_HINT = '纵轴为独立 0~100%，不与上图共用比例。';
+/** 浮框里那组横条的口径：它是条件分布，不是无条件概率 */
+export const HIT_MIX_CAPTION = '仅统计 ≥ 该分数的结果（合计 100%）';
 export const HIT_CHART_TITLE = '各命中档的概率';
 
 /** 参考线标注：`30.0 分` / `p = 11.66%` */

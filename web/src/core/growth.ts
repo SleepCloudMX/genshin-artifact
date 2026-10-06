@@ -421,6 +421,38 @@ export function survival(table: DistributionTable): number[] {
   return out;
 }
 
+/**
+ * **条件分布**：在「得分 ≥ `scores[i]`」的条件下，命中次数的分布（Σ = 1）。
+ *
+ * 回答的是「够到这条线的那些结果，是靠命中次数多堆出来的，还是靠档位好」——
+ * 与 `survival` 是同一批样本，只是换个维度切开。
+ *
+ * 口径：分母是「≥ 该分数」的**权重和**（= `survival[i] × total`），
+ * 所以**它一定与 `survival[i]` 无关地归一化**：换个分数线，各档的占比会变，
+ * 但合计恒为 100%。直接累加权重再除，不绕道概率，避免二次舍入。
+ *
+ * 下标越界时的约定（防御性，正常调用不会遇到）：
+ * `i < 0` 等同于 `i = 0`（「≥ 比最低分还低」就是全部结果）；
+ * `i ≥ scores.length` 返回全 0（没有任何结果满足）。
+ */
+export function hitMixAtLeast(table: DistributionTable, i: number): number[] {
+  const out = new Array<number>(table.hitBuckets).fill(0) as number[];
+  let sum = 0;
+  for (let j = Math.max(0, i); j < table.hits.length; j++) {
+    const row = table.hits[j]!;
+    for (let h = 0; h < table.hitBuckets; h++) {
+      const w = row[h]!;
+      if (w === 0) continue;
+      out[h] = (out[h] ?? 0) + w;
+      sum += w;
+    }
+  }
+  if (sum > 0) {
+    for (let h = 0; h < out.length; h++) out[h] = (out[h] ?? 0) / sum;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // 分桶：把相邻分数合并成一根柱子
 // ---------------------------------------------------------------------------
@@ -535,7 +567,8 @@ export function bucketize(
   return [...buckets.values()].sort((a, b) => a.score - b.score);
 }
 
-/** 按命中次数切分的 PMF（用于堆叠柱状图）：`[命中次数][得分下标]` */export function pmfByHit(table: DistributionTable): number[][] {
+/** 按命中次数切分的 PMF（用于堆叠柱状图）：`[命中次数][得分下标]` */
+export function pmfByHit(table: DistributionTable): number[][] {
   return Array.from({ length: table.hitBuckets }, (_, h) =>
     table.hits.map((row) => row[h]! / table.total),
   );

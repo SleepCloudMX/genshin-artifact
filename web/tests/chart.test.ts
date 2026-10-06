@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   renderScoreBars,
   renderSurvival,
+  type SurvivalChartOptions,
   renderHistogram,
   niceAxis,
   tickIndices,
@@ -270,6 +271,64 @@ describe('生存曲线（独立成图）', () => {
       tooltip: makeTooltip(),
     });
     expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(0);
+  });
+
+  /** 悬停第 i 列，返回浮框节点 */
+  function hoverCol(opts: Omit<SurvivalChartOptions, 'tooltip'>, i: number): HTMLElement {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    const svg = renderSurvival({ ...opts, tooltip });
+    host.append(svg);
+    svg
+      .querySelectorAll('rect.hot-rect')
+      [i]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    return host.querySelector('.tooltip') as HTMLElement;
+  }
+
+  it('浮框里画出「≥ 该分数时命中次数」的横排柱状图', () => {
+    const scores = [10, 11, 12, 13];
+    const surv = [1, 0.6, 0.25, 0.04];
+    // 第 2 列：命中 1 次 0.5 / 命中 3 次 0.5（0 的不画）
+    const mix = [0, 0.5, 0, 0.5, 0, 0];
+    const node = hoverCol(
+      {
+        scores,
+        survival: surv,
+        hitLabels: HIT_LABELS,
+        hitMix: () => mix,
+        hitMixCaption: '仅统计 ≥ 该分数的结果（合计 100%）',
+        title: 't',
+      },
+      2,
+    );
+
+    const cap = node.querySelector('.tt-chart-cap')!;
+    expect(cap.textContent).toContain('合计 100%');
+
+    const bars = [...node.querySelectorAll('.tt-bar')];
+    expect(bars).toHaveLength(2); // 概率为 0 的档不画
+    expect(bars[0]!.querySelector('.tt-bar-label')!.textContent).toBe('命中 1 次');
+    expect(bars[0]!.querySelector('.tt-bar-value')!.textContent).toBe('50.0%');
+    expect(bars[1]!.querySelector('.tt-bar-label')!.textContent).toBe('命中 3 次');
+    // 条长 = 概率本身；颜色与「命中次数」图共用同一套命中档配色
+    const fill = bars[1]!.querySelector('.tt-bar-fill') as HTMLElement;
+    expect(fill.style.width).toBe('50%');
+    expect(fill.style.background).not.toBe('');
+  });
+
+  it('不给 hitMix 就不画柱状图（其他图共用同一个浮框组件）', () => {
+    const node = hoverCol({ scores: [10, 11], survival: [1, 0.5], title: 't' }, 0);
+    expect(node.querySelectorAll('.tt-bar')).toHaveLength(0);
+    expect(node.querySelector('.tt-chart')).toBeNull();
+  });
+
+  it('概率全为 0 时不画空图，也不留小标题', () => {
+    const node = hoverCol(
+      { scores: [10, 11], survival: [1, 0.5], hitLabels: HIT_LABELS, hitMix: () => [0, 0, 0], title: 't' },
+      0,
+    );
+    expect(node.querySelector('.tt-chart')).toBeNull();
   });
 });
 

@@ -448,6 +448,46 @@ describe('主 tab 与子 tab', () => {
     expect(cardValues(root)[3]).not.toBe(before);
   });
 
+  /**
+   * 「达到概率」的浮框里要带一组横条：**≥ 该分数时命中次数的条件分布**。
+   *
+   * 这里验的是**接线**（core 的 `hitMixAtLeast` 真的接到了图上），
+   * 数学本身在 `core.test.ts` 里逐格对过。
+   */
+  it('达到概率的浮框里有命中次数条件分布，且各条合计 100%', () => {
+    const root = freshRoot();
+    mount(root);
+    clickSub(root, C.SUB_SURVIVAL);
+
+    const panel = visibleSubPanel(root);
+    const cols = panel.querySelectorAll('#survChart rect.hot-rect');
+    expect(cols.length).toBeGreaterThan(0);
+    // 挑一个分数线偏低的列：那里各命中档都还有质量，条数最多
+    cols[2]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+
+    const tt = root.querySelector('.tooltip')!;
+    expect(tt).not.toBeNull();
+    expect((tt as HTMLElement).hidden).toBe(false);
+    expect(tt.querySelector('.tt-chart-cap')!.textContent).toBe(C.HIT_MIX_CAPTION);
+
+    const bars = [...tt.querySelectorAll('.tt-bar')];
+    expect(bars.length).toBeGreaterThan(1);
+    // 合计 100%（每条显示到 0.1%，所以允许 0.1% × 条数 的舍入）
+    const sum = bars.reduce(
+      (s, b) => s + Number(b.querySelector('.tt-bar-value')!.textContent!.replace('%', '')),
+      0,
+    );
+    expect(Math.abs(sum - 100)).toBeLessThanOrEqual(0.1 * bars.length);
+    // 条长 = 概率本身，不是随手画的
+    for (const b of bars) {
+      const shown = Number(b.querySelector('.tt-bar-value')!.textContent!.replace('%', ''));
+      const width = Number(
+        (b.querySelector('.tt-bar-fill') as HTMLElement).style.width.replace('%', ''),
+      );
+      expect(width).toBeCloseTo(shown, 0);
+    }
+  });
+
   it('切主 tab 会把左栏配置整体换掉', () => {
     const root = freshRoot();
     mount(root);

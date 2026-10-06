@@ -42,6 +42,7 @@ import {
   scoreDistribution,
   pmfByHit,
   hitProbabilities,
+  hitMixAtLeast,
   probAtLeast,
   survival,
   expectedAttempts,
@@ -756,11 +757,15 @@ export function mount(root: HTMLElement): void {
             p.body.append(chart);
             box.append(p.box);
             if (!table) return;
-            const at = probAtLeast(table, state.targetScore);
+            const tbl = table;
+            const at = probAtLeast(tbl, state.targetScore);
             chart.append(
               renderSurvival({
-                scores: table.scores,
-                survival: survival(table),
+                scores: tbl.scores,
+                survival: survival(tbl),
+                hitLabels,
+                hitMix: (i) => hitMixAtLeast(tbl, i),
+                hitMixCaption: C.HIT_MIX_CAPTION,
                 ...(at > 0
                   ? { marker: { score: state.targetScore, label: C.markerProb(pct(at)) } }
                   : {}),

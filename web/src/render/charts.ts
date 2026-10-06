@@ -13,7 +13,7 @@
  */
 
 import { pct } from '../ui/format';
-import { Tooltip, type TooltipRow } from './tooltip';
+import { Tooltip, type TooltipBar, type TooltipRow } from './tooltip';
 
 const NAMESPACE = 'http://www.w3.org/2000/svg';
 
@@ -455,6 +455,17 @@ export interface SurvivalChartOptions {
   scores: number[];
   /** P(得分 ≥ scores[i]) */
   survival: number[];
+  /** 命中档的显示名，下标 = 命中次数（浮框里的条件分布要用） */
+  hitLabels?: string[];
+  /**
+   * 「得分 ≥ scores[i]」时**命中次数的条件分布**（Σ = 1，下标 = 命中次数）。
+   *
+   * 传函数而不是整张表：一次只需要一个下标的分布，
+   * 而且**计算留在 `core/`**（`hitMixAtLeast`），渲染层只负责画。
+   */
+  hitMix?: (i: number) => number[];
+  /** 条件分布那一组条上方的小标题，用来交代口径 */
+  hitMixCaption?: string;
   title?: string;
   marker?: ChartMarker;
   host?: HTMLElement | null;
@@ -464,7 +475,7 @@ export interface SurvivalChartOptions {
 }
 
 export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
-  const { scores, survival, title, marker, tooltip } = opts;
+  const { scores, survival, hitLabels, hitMix, hitMixCaption, title, marker, tooltip } = opts;
   const fit = fitSize(opts.host, { ratio: 0.34, minH: 280, maxH: 460 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
@@ -533,6 +544,11 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     dot.setAttribute('cx', String(x));
     dot.setAttribute('cy', String(y));
     dot.classList.add('on');
+
+    // 「≥ 该分数线」的结果里，命中次数怎么分布 —— 条件概率，合计 100%
+    const mix = hitMix?.(i);
+    const bars = mix ? hitMixBars(mix, hitLabels) : undefined;
+
     tooltip.show(
       {
         title: `${scores[i]!.toFixed(1)} 分及以上`,
@@ -544,6 +560,9 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
             value: survival[i]! > 0 ? `1 / p ≈ ${formatCount(1 / survival[i]!)}` : '不可能',
           },
         ],
+        ...(bars && bars.length > 0
+          ? { bars, ...(hitMixCaption ? { barsCaption: hitMixCaption } : {}) }
+          : {}),
         footer: '曲线越靠右越低，说明高分越稀有',
       },
       ev.clientX,
@@ -572,6 +591,28 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   });
 
   return f.svg;
+}
+
+/**
+ * 命中次数的条件分布 → 浮框里的横排柱状图。
+ *
+ * 概率为 0 的档不画（`hitMixAtLeast` 返回的是定长数组，里面会有 0），
+ * 顺序按命中次数升序、颜色共用 `hitColor` —— 与「命中次数」子 tab 的柱状图一致，
+ * 这样「同一档 = 同一颜色」在整个界面里成立。
+ */
+function hitMixBars(mix: readonly number[], hitLabels?: string[]): TooltipBar[] {
+  const bars: TooltipBar[] = [];
+  for (let h = 0; h < mix.length; h++) {
+    const p = mix[h]!;
+    if (p <= 0) continue;
+    bars.push({
+      label: hitLabels?.[h] ?? `命中 ${h} 次`,
+      fraction: p,
+      value: pct(p, 1),
+      color: hitColor(h),
+    });
+  }
+  return bars;
 }
 
 /** 粗略的「多少个」文案，避免长串数字 */
