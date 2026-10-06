@@ -134,6 +134,9 @@ interface Frame {
   plot: SVGGElement;
   plotW: number;
   plotH: number;
+  /** 绘图区距画布上 / 左的距离（`plot` 的 translate），浮框锚点要加回去 */
+  marginTop: number;
+  marginLeft: number;
   width: number;
   height: number;
 }
@@ -166,7 +169,7 @@ function frame(opts: {
   }
   const plot = el('g', { transform: `translate(${margin.left},${margin.top})` });
   svg.append(plot);
-  return { svg, plot, plotW, plotH, width, height };
+  return { svg, plot, plotW, plotH, marginTop: margin.top, marginLeft: margin.left, width, height };
 }
 
 /** 画水平网格线 + 左侧百分比刻度 */
@@ -360,12 +363,12 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
     f.plotH + 48,
   );
 
-  // --- 悬停层放在最后（绘制顺序 = z 序）：
-  //     每列一块透明热区，比逐个柱段监听省事，也不会在柱段之间留缝漏掉指针。
-  //     辅助线与概率角标也画在最上层，否则会被柱子盖住。
+  // --- 悬停层：**每列一块透明热区，事件挂在热区自己身上**。
+  //
+  // 这里刻意**不做「光标坐标 → 数据下标」的换算**（见 `plotLocalPoint` 的注释）：
+  // 命中的是哪块热区就是哪一列，由浏览器做命中测试，精确且不受 DPR 影响。
   const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
   f.plot.append(guide);
-
 
   data.forEach((d, i) => {
     const x = xOf(i);
@@ -381,12 +384,15 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      // 浮框锚在**柱顶**（与竖线同一位置）：竖线、浮框、数据点必须是一套坐标。
-      // 概率写在浮框标题行的右上角（badge），不再另设图内角标。
+      // 浮框：**横向跟着数据点、竖直固定在绘图区顶部**。
+      //
+      // 竖直不能跟柱顶走：柱子高低不同，鼠标横划时浮框会上下乱飞。
+      // 也不能跟鼠标走：那样浮框与竖线、数据点就是两套位置（作者截图指出过）。
+      // 固定在顶部两个毛病都没有：横向始终对齐竖线，纵向纹丝不动。
       tooltip.showAt(
         f.svg,
-        x,
-        yOf(totals[i]!),
+        x + f.marginLeft,
+        f.marginTop,
         scoreTooltip(d, totals[i]!, hitLabels, i, data.length),
       );
     });
@@ -517,38 +523,15 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   );
 
   // --- 悬停：垂直线 + 高亮点 + 浮框 ---
-  // 透明捕获层要在曲线**之后**追加，才能盖在填充区上面接住指针事件。
-  const overlay = el('rect', {
-    x: 0,
-    y: 0,
-    width: f.plotW,
-    height: f.plotH,
-    fill: 'transparent',
-    class: 'hot-rect',
-  });
-  f.plot.append(overlay);
-
+  //
+  // **每列一块热区，事件挂在热区自己身上** —— 不做「光标坐标 → 下标」的换算。
+  // 之前是一整块覆盖层 + 自己算 `floor(localX / bandW)`，而那个换算在真实浏览器里
+  // 有随位置增大的残差（竖线比光标偏 1~4px）。改由浏览器做命中测试就没有这个问题。
   const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
   const dot = el('circle', { class: 'hover-dot', r: 4.5, cx: -99, cy: -99 });
   f.plot.append(guide, dot);
 
-  const localPoint = plotLocalPoint(f.plot);
-  const pick = (ev: MouseEvent): number => {
-    const p = localPoint?.(ev.clientX, ev.clientY);
-    if (!p) {
-      // 退不到几何量算时（未挂载 / jsdom），用事件在组内的偏移比例兜底
-      const box = f.plot.getBoundingClientRect();
-      const ratio = box.width > 0 ? (ev.clientX - box.left) / box.width : 0;
-      return Math.max(0, Math.min(scores.length - 1, Math.floor(ratio * scores.length)));
-    }
-    const i = Math.floor(p.x / bandW);
-    return Math.max(0, Math.min(scores.length - 1, i));
-  };
-
-  let shown = -1;
   const paint = (i: number): void => {
-    if (i === shown) return;
-    shown = i;
     const x = xOf(i);
     const y = yOf(survival[i]!);
     guide.setAttribute('x1', String(x));
@@ -560,8 +543,8 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     // 浮框锚在**曲线上的那个点**，和竖线、高亮点是同一个位置
     tooltip.showAt(
       f.svg,
-      x,
-      y,
+      x + f.marginLeft,
+      y + f.marginTop,
       {
         title: `${scores[i]!.toFixed(1)} 分及以上`,
         subtitle: `P(得分 ≥ ${scores[i]!.toFixed(1)})`,
@@ -579,13 +562,23 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     );
   };
 
-  overlay.addEventListener('mouseenter', (ev) => paint(pick(ev)));
-  overlay.addEventListener('mousemove', (ev) => paint(pick(ev)));
-  overlay.addEventListener('mouseleave', () => {
-    shown = -1;
-    guide.classList.remove('on');
-    dot.classList.remove('on');
-    tooltip.hide();
+  scores.forEach((_, i) => {
+    const x = xOf(i);
+    const col = el('rect', {
+      x: x - bandW / 2,
+      y: 0,
+      width: Math.max(bandW, 2),
+      height: f.plotH,
+      fill: 'transparent',
+      class: 'hot-rect',
+    });
+    col.addEventListener('mouseenter', () => paint(i));
+    col.addEventListener('mouseleave', () => {
+      guide.classList.remove('on');
+      dot.classList.remove('on');
+      tooltip.hide();
+    });
+    f.plot.append(col);
   });
 
   return f.svg;
@@ -692,11 +685,11 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      // 浮框锚在**柱顶**，和竖线一致
+      // 浮框横向跟柱子、竖直固定在顶部（理由同堆叠柱：跟柱顶会上下乱飞）
       tooltip.showAt(
         f.svg,
-        x,
-        yOf(d.value),
+        x + f.marginLeft,
+        f.marginTop,
         {
           title: d.label,
           rows: [
@@ -722,17 +715,18 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 /**
  * 把鼠标的视口坐标换算成**绘图区局部坐标**。
  *
- * **必须用 `getScreenCTM()` 的逆矩阵**，不能自己算 `svgBox.width / viewBox.width`：
- * `svg.chart { width: 100% }` 会把 viewBox 横向拉伸到容器宽度（横竖比例不同），
- * 用「平均缩放比」在右侧会越走越偏。
+ * **本文件已不再用它**，保留是因为它记录了一个踩过的坑，别的地方（如热力图）若要
+ * 自己做命中判定会需要。用在界面上时优先考虑**让浏览器做命中测试**
+ * （每列一块热区、事件挂在热区上），那比任何手写换算都准。
  *
- * 曾经就是这么错的：viewBox 898 宽、绘图区实际 934px，于是光标放到最右时
- * 命中的是第 86 根柱子而不是第 84 根，**屏幕上差一百多像素**。
- * 逆矩阵是浏览器命中测试用的同一套变换，天然对齐，也顺带处理了 `viewBox` 偏移。
+ * 用 `getScreenCTM()` 的逆矩阵，而不是 `svgBox.width / viewBox.width`：
+ * 后者假设了等比缩放，而 `svg.chart { width: 100% }` 会横向拉伸 viewBox。
+ * 但实测**即使换成逆矩阵仍有随位置增大的残差**（`ctm.a` 比真实渲染比例多约 0.6%，
+ * 竖线比光标偏 1~4px），所以坐标换算这条路整体不可靠。
  *
  * 取不到 CTM（jsdom、未挂载）时返回 `null`，调用方自己退化。
  */
-function plotLocalPoint(
+export function plotLocalPoint(
   plot: SVGGElement,
 ): ((clientX: number, clientY: number) => { x: number; y: number } | null) | null {
   const svg = plot.ownerSVGElement;
