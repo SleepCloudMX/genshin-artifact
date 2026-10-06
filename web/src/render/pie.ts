@@ -91,7 +91,8 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
           rows: [{ label: d.label, value: pct(d.p / total, 2), color: d.color ?? hitColor(i) }],
           footer: d.note ?? '「其他」是概率过小、被合并的长尾',
         },
-        { clientX: ev.clientX, clientY: ev.clientY },
+        ev.clientX,
+        ev.clientY,
       );
     });
     path.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));

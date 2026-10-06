@@ -386,10 +386,7 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
       guide.classList.add('on');
       // 浮框**跟光标**：这是界面上的标准行为，不要改成锚数据点 ——
       // 「交互点与光标不一致」是命中测试的问题（见上面的热区注释），与浮框位置无关。
-      tooltip.show(scoreTooltip(d, totals[i]!, hitLabels, i, data.length), {
-        clientX: ev.clientX,
-        clientY: ev.clientY,
-      });
+      tooltip.show(scoreTooltip(d, totals[i]!, hitLabels, i, data.length), ev.clientX, ev.clientY);
     });
     hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
@@ -549,7 +546,8 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
         ],
         footer: '曲线越靠右越低，说明高分越稀有',
       },
-      { clientX: ev.clientX, clientY: ev.clientY },
+      ev.clientX,
+      ev.clientY,
     );
   };
 
@@ -685,7 +683,8 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
             ...(d.note ? [{ label: '说明', value: d.note }] : []),
           ],
         },
-        { clientX: ev.clientX, clientY: ev.clientY },
+        ev.clientX,
+        ev.clientY,
       );
     });
     hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));

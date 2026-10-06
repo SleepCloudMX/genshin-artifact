@@ -27,27 +27,14 @@ export interface TooltipContent {
   footer?: string;
 }
 
-const GAP = 12;
+/** 浮框与光标的间距：太小会贴上指针，太大又离得远 */
+const OFFSET = 14;
 const EDGE = 8;
-/**
- * 浮框锚点：**跟光标**（默认）或**跟数据点**。
- *
- * - `'cursor'`：中规中矩的悬浮提示，位置随指针走。**这是界面上的默认行为**。
- *   最初就是这么做的，作者明确要求保持。
- * - `'data'`：锚在数据点的 viewBox 坐标上。
- *
- * 注意：**「交互点与光标不一致」是命中测试的问题**（哪一列被点亮），
- * 不是浮框位置的问题 —— 别用改浮框位置去治它。见 `charts.ts` 里每列热区的注释。
- */
-export type Anchor = 'cursor' | 'data';
-
-/** 水平方向往哪边让开 */
-export type Prefer = 'right' | 'left' | 'auto';
 
 export class Tooltip {
   private readonly node: HTMLDivElement;
   private frame = 0;
-  private pending: { x: number; y: number; prefer?: Prefer } | null = null;
+  private pending: { x: number; y: number } | null = null;
 
   constructor(private readonly host: HTMLElement) {
     const node = document.createElement('div');
@@ -58,52 +45,22 @@ export class Tooltip {
     this.node = node;
   }
 
-  /**
-   * 显示浮框。**默认跟光标**（`anchor: 'cursor'`）—— 这是界面上的标准行为。
-   *
-   * `anchor: 'data'` 时才用 `(x, y)`（相对该 SVG `viewBox` 的坐标）当锚点。
-   */
-  show(
-    content: TooltipContent,
-    at: {
-      anchor?: Anchor;
-      clientX: number;
-      clientY: number;
-      /** 仅 nchor: 'data' 时使用 */
-      svg?: SVGSVGElement;
-      x?: number;
-      y?: number;
-      prefer?: Prefer;
-    },
-  ): void {
+  /** 显示浮框；`(x, y)` 是**光标的视口坐标** */
+  show(content: TooltipContent, x: number, y: number): void {
     this.node.replaceChildren(build(content));
     this.node.hidden = false;
-
-    const prefer = at.prefer ?? 'auto';
-    if (at.anchor === 'data' && at.x !== undefined && at.y !== undefined && at.svg) {
-      const box = at.svg.getBoundingClientRect();
-      const scale = box.width > 0 ? box.width / (at.svg.viewBox.baseVal.width || box.width) : 1;
-      const left = box.left + at.x * scale;
-      const top = box.top + at.y * scale;
-      const size = this.node.getBoundingClientRect();
-      const wantLeft =
-        prefer === 'left' || (prefer === 'auto' && left + GAP + size.width > window.innerWidth - EDGE);
-      this.move(wantLeft ? left - GAP : left + GAP, top, wantLeft ? 'left' : 'right');
-      return;
-    }
-
-    this.move(at.clientX + GAP, at.clientY + GAP, prefer);
+    this.move(x, y);
   }
 
   /** 更新位置；同一帧内多次调用只会重排一次 */
-  move(clientX: number, clientY: number, prefer: Prefer = 'auto'): void {
-    this.pending = { x: clientX, y: clientY, prefer };
+  move(x: number, y: number): void {
+    this.pending = { x, y };
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       const p = this.pending;
       if (!p) return;
-      this.place(p.x, p.y, p.prefer ?? 'auto');
+      this.place(p.x, p.y);
     });
   }
 
@@ -122,17 +79,21 @@ export class Tooltip {
   }
 
   /**
-   * `clientX/clientY` 是**摆放的参考点**（对 `cursor` 锚点来说就是光标位置，
-   * 且调用方已经加好让开的间距）。水平按 `prefer` 决定以它左边缘还是右边缘对齐，
-   * 竖直以它为中线，越界贴边。
+   * 摆在光标**右下方**并留出 `OFFSET` 的间距；右/下越界就翻到另一侧。
+   *
+   * 是整体平移一个间距，**不是**以光标为中线对齐 —— 后者会让浮框的某一边
+   * 正好压在指针上（作者指出过"紧贴光标、与边框重叠"）。
    */
-  private place(clientX: number, clientY: number, prefer: Prefer): void {
+  private place(clientX: number, clientY: number): void {
     const box = this.node.getBoundingClientRect();
-    const goLeft = prefer === 'left';
-    let left = goLeft ? clientX - box.width : clientX;
-    let top = clientY - box.height / 2;
+    let left = clientX + OFFSET;
+    let top = clientY + OFFSET;
 
-    // 越界就贴边（浮框比视口还大时也只能贴边）
+    // 右/下越界就翻到另一侧
+    if (left + box.width > window.innerWidth - EDGE) left = clientX - OFFSET - box.width;
+    if (top + box.height > window.innerHeight - EDGE) top = clientY - OFFSET - box.height;
+
+    // 仍然越界（浮框比视口还大）就贴边
     left = Math.max(EDGE, Math.min(left, window.innerWidth - box.width - EDGE));
     top = Math.max(EDGE, Math.min(top, window.innerHeight - box.height - EDGE));
 

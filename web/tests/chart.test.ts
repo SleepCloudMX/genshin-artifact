@@ -336,7 +336,8 @@ describe('浮框', () => {
         rows: [{ label: '命中 3 次', value: '1.20%', color: '#3b82f6' }],
         footer: '第 1 / 100 个可能分数',
       },
-      { clientX: 10, clientY: 10 },
+      10,
+      10,
     );
 
     const node = host.querySelector('.tooltip')!;
@@ -353,7 +354,7 @@ describe('浮框', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
-    tooltip.show({ title: 'x', rows: [] }, { clientX: 0, clientY: 0 });
+    tooltip.show({ title: 'x', rows: [] }, 0, 0);
     tooltip.hide();
     expect((host.querySelector('.tooltip') as HTMLElement).hidden).toBe(true);
   });
