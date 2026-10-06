@@ -83,6 +83,16 @@ export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
 
+/** 分桶：柱数太多时把相邻分数并成一根柱子 */
+export const BUCKET_LABEL = '分桶';
+export const BUCKET_NONE = '不分桶';
+export function bucketSizeLabel(size: number): string {
+  return size <= 0.1 ? BUCKET_NONE : String(size);
+}
+export function barCountHint(bars: number, bucketed: boolean): string {
+  return bucketed ? `已合并为 ${bars} 根柱子` : `${bars} 根柱子`;
+}
+
 // ---------------------------------------------------------------------------
 // 指标卡
 // ---------------------------------------------------------------------------
@@ -111,7 +121,11 @@ export const DROP_OUT_OF_RANGE = '该部位没有这个主词条';
 // ---------------------------------------------------------------------------
 
 export const GROWTH_TABLE_TITLE = '成长值';
-export const GROWTH_TABLE_HINT = '四档成长值；已四舍五入，与游戏实际可能有出入。';
+/**
+ * 表头的说明。注意措辞：**不是我们做了取整**，而是游戏内就只显示到一位小数，
+ * 我们手上只有这个数据。写成「已四舍五入」会把被动说成主动。
+ */
+export const GROWTH_TABLE_HINT = '游戏内只显示到一位小数，故累加后与官方数值可能有细微出入。';
 export const TH_GROWTH_ATTR = '词条';
 export const TH_GROWTH_TIERS = ['一档', '二档', '三档', '四档'] as const;
 export const GROWTH_TABLE_EMPTY = '还没有计分词条。';

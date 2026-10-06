@@ -10,6 +10,7 @@ import {
   type SubAttr,
 } from '../core/stats';
 import {
+  isBucketSize,
   isInitialRoll,
   type ArtifactSpec,
   type InitialRoll,
@@ -60,6 +61,13 @@ export interface GrowthConfig {
   initialVisible: InitialVisible;
   /** 目标分数（用于「要刷多少个」） */
   targetScore: number;
+  /**
+   * 得分分布图的分桶宽度（分）。`0.1` = 不合并。
+   *
+   * 默认值由 `autoBucketSize` 按「柱数 ≤ 100」算出来，用户可以在「概率分布」
+   * 子 tab 里改；**显式改过的值会写进 URL**，分享出去看到的还是同一个视图。
+   */
+  bucketSize: number;
 }
 
 export interface AppState extends SharedConfig, GrowthConfig {}
@@ -154,7 +162,8 @@ export function defaultShared(): SharedConfig {
 }
 
 export function defaultGrowth(): GrowthConfig {
-  return { initialVisible: 4, targetScore: 30 };
+  // bucketSize = 0 表示「还没显式选过」→ 由图表按柱数自动挑
+  return { initialVisible: 4, targetScore: 30, bucketSize: 0 };
 }
 
 /** 完整默认状态（两个 tab 的配置合起来） */
@@ -257,6 +266,8 @@ export function toQuery(state: AppState): string {
   p.set('iv', String(state.initialVisible));
   p.set('target', String(state.targetScore));
   p.set('slots', state.slots.map(encodeSlot).join(','));
+  // `0` = 还没显式选过，按柱数自动挑；只有显式选过才写进链接
+  if (state.bucketSize > 0) p.set('bucket', String(state.bucketSize));
   if (state.theme === 'dark') p.set('theme', 'dark');
   return p.toString();
 }
@@ -303,12 +314,14 @@ export function fromQuery(search: string): AppState {
 
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
+    const bucket = Number(p.get('bucket'));
     return {
       slot,
       mainAttr,
       slots: parts.map(decodeSlot) as Slots,
       initialVisible: iv === 3 || iv === 4 ? iv : fallback.initialVisible,
       targetScore: Number.isFinite(target) && target >= 0 ? target : fallback.targetScore,
+      bucketSize: isBucketSize(bucket) ? bucket : fallback.bucketSize,
       theme: p.get('theme') === 'dark' ? 'dark' : 'light',
     };
   } catch {

@@ -32,6 +32,10 @@ import {
   expectedAttempts,
   scoreAtAlpha,
   tierLabel,
+  BUCKET_OPTIONS,
+  MAX_BARS,
+  autoBucketSize,
+  bucketize,
   type ArtifactSpec,
   type Slot,
 } from '../src/core/growth';
@@ -411,6 +415,89 @@ describe('掉落概率', () => {
   it('主词条别名要规范化：爆伤主词条也要挡掉「暴伤」副词条', () => {
     const d = dropProbability({ mainAttr: '爆伤', weights: { 暴伤: 1 } }, '头');
     expect(d.subsP).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 分桶
+// ---------------------------------------------------------------------------
+describe('分桶', () => {
+  /** 造一组「分数 → 各命中档概率」的输入 */
+  const rows = (scores: number[]) => scores.map(() => [0.1, 0.2, 0.3]);
+
+  it('size = 0.1 不合并：每个分数一根柱子', () => {
+    const scores = [10.8, 10.9, 11.0];
+    const bars = bucketize(scores, rows(scores), 0.1);
+    expect(bars).toHaveLength(3);
+    expect(bars.map((b) => b.score)).toEqual(scores);
+    expect(bars.every((b) => b.count === 1)).toBe(true);
+  });
+
+  it('桶边界对齐到 size 的整数倍，而不是从最低分开始切', () => {
+    // 10.8 起、size = 1 → 桶必须是 [10,10.9]，不能是 [10.8,11.7]
+    const scores = [10.8, 10.9, 11.0, 11.9, 12.0];
+    const bars = bucketize(scores, rows(scores), 1);
+    expect(bars.map((b) => b.score)).toEqual([10, 11, 12]);
+    expect(bars[0]).toMatchObject({ minScore: 10.8, maxScore: 10.9, count: 2 });
+    expect(bars[1]).toMatchObject({ minScore: 11.0, maxScore: 11.9, count: 2 });
+    expect(bars[2]).toMatchObject({ minScore: 12.0, maxScore: 12.0, count: 1 });
+  });
+
+  it('各档位都不产生浮点毛刺（桶起点落在 0.1 网格上）', () => {
+    const scores: number[] = [];
+    for (let s = 108; s <= 600; s += 1) scores.push(s / 10);
+    for (const size of BUCKET_OPTIONS) {
+      for (const b of bucketize(scores, rows(scores), size)) {
+        expect(Number.isFinite(b.score)).toBe(true);
+        // 必须是 0.1 的整数倍，且字符串化后不超过一位小数
+        expect(Math.abs(b.score * 10 - Math.round(b.score * 10))).toBeLessThan(1e-9);
+        expect(String(b.score)).not.toMatch(/\.\d{2,}/);
+      }
+    }
+  });
+
+  it('合并后概率按档累加，总和不变', () => {
+    // 10.8 / 10.9 落在桶 [10, 10.9]；11.0 / 11.1 落在桶 [11, 11.9]
+    const scores = [10.8, 10.9, 11.0, 11.1];
+    const src = scores.map(() => [0.1, 0.2, 0.3]);
+    const bars = bucketize(scores, src, 1);
+    expect(bars).toHaveLength(2);
+    expect(bars.map((b) => b.count)).toEqual([2, 2]);
+
+    const before = src.flat().reduce((s, v) => s + v, 0);
+    const after = bars.flatMap((b) => b.byHit).reduce((s, v) => s + v, 0);
+    expect(after).toBeCloseTo(before, 12);
+
+    // 每桶两个分数，各档翻倍
+    for (const b of bars) {
+      expect(b.total).toBeCloseTo(1.2, 12);
+      expect(b.byHit).toEqual([0.2, 0.4, 0.6]);
+    }
+  });
+
+  it('空输入不抛错', () => {
+    expect(bucketize([], [], 1)).toEqual([]);
+  });
+
+  it('autoBucketSize 保证柱数不超过上限', () => {
+    // 0.1 网格上铺 450 个分数（跨 45 分）
+    const scores: number[] = [];
+    for (let s = 108; s <= 557; s += 1) scores.push(s / 10);
+    expect(scores.length).toBeGreaterThan(MAX_BARS);
+
+    const size = autoBucketSize(scores);
+    const bars = bucketize(scores, scores.map(() => [1]), size);
+    expect(bars.length).toBeLessThanOrEqual(MAX_BARS);
+    // 挑的是「够用的最小档」：前一档会超限
+    const idx = BUCKET_OPTIONS.indexOf(size);
+    if (idx > 0) {
+      const smaller = bucketize(scores, scores.map(() => [1]), BUCKET_OPTIONS[idx - 1]!);
+      expect(smaller.length).toBeGreaterThan(MAX_BARS);
+    }
+  });
+
+  it('柱数本来就够少时不动（0.1 = 不合并）', () => {
+    expect(autoBucketSize([10.8, 11.0, 11.2])).toBe(0.1);
   });
 });
 

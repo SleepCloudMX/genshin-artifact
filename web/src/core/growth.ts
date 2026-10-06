@@ -184,7 +184,7 @@ function slotTables(attr: SubAttr, weight: number, initialRoll: InitialRoll): nu
 /**
  * 某词条「成长到第 t 档」的展示文案，如 `2.7`；带权重时显示计分值，如权重 2 → `5.4`。
  *
- * **固定一位小数，不要把尾随的 0 去掉**：成长值本身是游戏里四舍五入过的
+ * **固定一位小数，不要把尾随的 0 去掉**：成长值只有游戏内显示的这一个精度
  * （暴伤四档是 5.4 / 6.2 / 7.0 / 7.8），`7` 和 `7.0` 表达的有效位数不同，
  * 而「7.0」才是数据本身的样子。同理权重 2 的暴击是 5.4 / 6.2 / 7.0 / 7.8。
  */
@@ -421,8 +421,121 @@ export function survival(table: DistributionTable): number[] {
   return out;
 }
 
-/** 按命中次数切分的 PMF（用于堆叠柱状图）：`[命中次数][得分下标]` */
-export function pmfByHit(table: DistributionTable): number[][] {
+// ---------------------------------------------------------------------------
+// 分桶：把相邻分数合并成一根柱子
+// ---------------------------------------------------------------------------
+
+/**
+ * 可选的分桶宽度（单位「分」）。`0.1` = 不合并（分数本身就是 0.1 的倍数）。
+ *
+ * 为什么是离散档位而不是「随便填一个 d」：桶边界要对齐到 d 的整数倍，
+ * 否则同一个桶在不同配置下含义会变（`[20.7, 21.6]` 这种）。对齐之后
+ * `[20.0, 20.9]` 这种含义稳定的桶只有 d ∈ {0.1, 0.2, 0.5, 1, 2, 5…} 能得到，
+ * 所以做成可选档位反而更清楚。最常用的是 `1`。
+ */
+export const BUCKET_OPTIONS = [0.1, 0.2, 0.5, 1, 2, 5] as const;
+export type BucketSize = (typeof BUCKET_OPTIONS)[number];
+
+/** 柱数上限：超过这个数就该分桶了（也是自动挑选的依据） */
+export const MAX_BARS = 100;
+
+export function isBucketSize(v: unknown): v is BucketSize {
+  return (BUCKET_OPTIONS as readonly number[]).includes(v as number);
+}
+
+/** 覆盖 `[lo, hi]` 需要多少个宽度为 `size` 的对齐桶 */
+function bucketCount(lo: number, hi: number, size: number): number {
+  return Math.floor(hi / size + 1e-9) - Math.floor(lo / size + 1e-9) + 1;
+}
+
+/**
+ * 按「柱数不超过 `maxBars`」自动挑最小的分桶宽度。
+ *
+ * 分数本身就是 0.1 的倍数，所以不会出现比 0.1 更细的需求：**取到 0.1 即「不合并」**。
+ */
+export function autoBucketSize(scores: readonly number[], maxBars = MAX_BARS): BucketSize {
+  if (scores.length <= maxBars) return 0.1;
+  const lo = scores[0]!;
+  const hi = scores[scores.length - 1]!;
+  for (const size of BUCKET_OPTIONS) {
+    if (bucketCount(lo, hi, size) <= maxBars) return size;
+  }
+  return BUCKET_OPTIONS[BUCKET_OPTIONS.length - 1]!;
+}
+
+export interface ScoreBucket {
+  /** 桶的起点分数（`size` 的整数倍）—— 轴上的标号就用它 */
+  score: number;
+  /** 桶内实际的最小 / 最大分数；只有一个分数时二者相等 */
+  minScore: number;
+  maxScore: number;
+  /** 桶内分数个数；1 表示这根柱子就是一个分数 */
+  count: number;
+  /** 桶内各命中档的概率之和，下标 = 命中次数 */
+  byHit: number[];
+  /** 桶内总概率 */
+  total: number;
+}
+
+/**
+ * 把「每个分数的命中构成」按 `size` 合并成桶。
+ *
+ * **桶边界对齐到 `size` 的整数倍**（`floor(score / size)`），而不是从最低分开始切：
+ * `size = 1` 时永远是 `[20.0, 20.9]` 这样的桶，含义与具体配置无关。
+ *
+ * 桶起点按「整数下标 × size 再归整到 0.1」算，避免 `0.1 × 整数` 攒出
+ * `10.799999999999999` 这类毛刺（分数网格本身就是 0.1）。
+ *
+ * `size <= 0.1` 时不合并，原样返回（每个分数一根柱子）。
+ */
+export function bucketize(
+  scores: readonly number[],
+  byHitRows: readonly number[][],
+  size: number,
+): ScoreBucket[] {
+  if (!(size > 0.1 + 1e-9)) {
+    return scores.map((score, i) => {
+      const byHit = byHitRows[i] ?? [];
+      return {
+        score,
+        minScore: score,
+        maxScore: score,
+        count: 1,
+        byHit: [...byHit],
+        total: byHit.reduce((s, v) => s + v, 0),
+      };
+    });
+  }
+
+  const buckets = new Map<number, ScoreBucket>();
+  scores.forEach((score, i) => {
+    const index = Math.floor(score / size + 1e-9);
+    // 先算整数下标再乘，最后归整到 0.1 —— 分数网格就是 0.1
+    const start = Math.round(index * size * 10) / 10;
+    let b = buckets.get(start);
+    if (!b) {
+      b = { score: start, minScore: score, maxScore: score, count: 0, byHit: [], total: 0 };
+      buckets.set(start, b);
+    }
+    const row = byHitRows[i] ?? [];
+    for (let h = 0; h < row.length; h++) {
+      b.byHit[h] = (b.byHit[h] ?? 0) + (row[h] ?? 0);
+    }
+    b.count++;
+    b.minScore = Math.min(b.minScore, score);
+    b.maxScore = Math.max(b.maxScore, score);
+    b.total += row.reduce((s, v) => s + v, 0);
+  });
+
+  // 每个桶的 byHit 补齐长度，避免图上读到 undefined
+  const width = buckets.size === 0 ? 0 : Math.max(...[...buckets.values()].map((b) => b.byHit.length));
+  for (const b of buckets.values()) {
+    for (let h = 0; h < width; h++) b.byHit[h] = b.byHit[h] ?? 0;
+  }
+  return [...buckets.values()].sort((a, b) => a.score - b.score);
+}
+
+/** 按命中次数切分的 PMF（用于堆叠柱状图）：`[命中次数][得分下标]` */export function pmfByHit(table: DistributionTable): number[][] {
   return Array.from({ length: table.hitBuckets }, (_, h) =>
     table.hits.map((row) => row[h]! / table.total),
   );

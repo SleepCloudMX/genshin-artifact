@@ -238,8 +238,13 @@ function legend(
 // ---------------------------------------------------------------------------
 
 export interface StackedDatum {
-  /** 分数 */
+  /** 轴上的标号（不合并时就是分数本身；合并后是桶的起点） */
   score: number;
+  /**
+   * 该柱覆盖的分数区间（闭区间）。**只在分桶时有意义**：
+   * 合并后一根柱子代表一批分数，浮框里必须写清区间，否则读不出具体范围。
+   */
+  range?: { min: number; max: number };
   /** 该分数下「命中 h 次」的概率，下标 = 命中次数 */
   byHit: number[];
 }
@@ -399,18 +404,24 @@ function scoreTooltip(
   for (let h = d.byHit.length - 1; h >= 0; h--) {
     const p = d.byHit[h]!;
     if (p <= 0) continue;
-    // 条件概率：在「正好是这个分数」的前提下，有多少来自命中 h 次
+    // 条件概率：在「正好落在这根柱子」的前提下，有多少来自命中 h 次
     rows.push({
       label: hitLabels[h] ?? `命中 ${h} 次`,
-      value: `${pct(p)}（占本分的 ${pct(total > 0 ? p / total : 0, 1)}）`,
+      value: `${pct(p)}（占本柱的 ${pct(total > 0 ? p / total : 0, 1)}）`,
       color: hitColor(h),
     });
   }
+
+  const bucketed = d.range !== undefined && d.range.min !== d.range.max;
   return {
-    title: `${d.score.toFixed(1)} 分`,
-    subtitle: `恰好等于该分数的概率 ${pct(total)}`,
+    title: bucketed ? `${d.range!.min.toFixed(1)} – ${d.range!.max.toFixed(1)} 分` : `${d.score.toFixed(1)} 分`,
+    subtitle: bucketed
+      ? `落在这个区间的概率 ${pct(total)}`
+      : `恰好等于该分数的概率 ${pct(total)}`,
     rows,
-    footer: `第 ${i + 1} / ${count} 个可能分数`,
+    footer: bucketed
+      ? `第 ${i + 1} / ${count} 根柱子（每根合并了若干分数）`
+      : `第 ${i + 1} / ${count} 个可能分数`,
   };
 }
 

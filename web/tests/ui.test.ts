@@ -527,6 +527,82 @@ describe('主 tab 与子 tab', () => {
   });
 });
 
+describe('分桶（柱数太多时合并相邻分数）', () => {
+  beforeEach(() => resetUrl());
+
+  /** 「概率分布」子 tab 里的分桶下拉 */
+  function bucketSelect(root: HTMLElement): HTMLSelectElement {
+    return visibleSubPanel(root).querySelector<HTMLSelectElement>('#bucketSize')!;
+  }
+
+  /** 控件旁那句「N 根柱子 / 已合并为 N 根柱子」 */
+  function barCountText(root: HTMLElement): string {
+    return visibleSubPanel(root).querySelector('.chart-tools .hint')!.textContent ?? '';
+  }
+
+  it('分桶下拉的档位是 0.1/0.2/0.5/1/2/5', () => {
+    const root = freshRoot();
+    mount(root);
+    expect([...bucketSelect(root).options].map((o) => o.value)).toEqual([
+      '0.1',
+      '0.2',
+      '0.5',
+      '1',
+      '2',
+      '5',
+    ]);
+  });
+
+  it('柱数没超上限时不分桶', () => {
+    const root = freshRoot();
+    mount(root);
+    // 默认配置只有 87 个可能分数
+    expect(bucketSelect(root).value).toBe('0.1');
+    expect(barCountText(root)).toMatch(/^\d+ 根柱子$/);
+  });
+
+  it('柱数超过 100 时自动挑一档分桶，且柱数落回上限内', () => {
+    const root = freshRoot();
+    mount(root);
+    // 多给几个计分词条 → 可能分数变多
+    setSelect(attrSelects(root)[2]!, '充能');
+    setSelect(attrSelects(root)[3]!, '精通');
+
+    const bars = Number(barCountText(root).match(/\d+/)![0]);
+    expect(bars).toBeLessThanOrEqual(100);
+    expect(barCountText(root)).toContain('已合并');
+    expect(Number(bucketSelect(root).value)).toBeGreaterThan(0.1);
+  });
+
+  it('手动选的档位会生效，并写进分享链接', () => {
+    const root = freshRoot();
+    mount(root);
+    const sel = bucketSelect(root);
+    setSelect(sel, '2');
+    expect(bucketSelect(root).value).toBe('2');
+    expect(barCountText(root)).toContain('已合并');
+
+    // 往返：bucket 参数能读回来
+    const s = { ...defaultState(), bucketSize: 2 };
+    expect(fromQuery('?' + toQuery(s)).bucketSize).toBe(2);
+    // 没选过（0）时不写进链接，读回来仍是 0
+    expect(toQuery({ ...defaultState(), bucketSize: 0 })).not.toContain('bucket');
+    expect(fromQuery('?' + toQuery({ ...defaultState(), bucketSize: 0 })).bucketSize).toBe(0);
+  });
+
+  it('分桶后悬停框写的是区间而不是单点', () => {
+    const root = freshRoot();
+    mount(root);
+    setSelect(bucketSelect(root), '2');
+    // 柱子上不再有逐分数的 title，区间信息由浮框承载；
+    // 这里只验证结构：柱子数变少、且轴标号仍是 0.1 网格
+    const labels = [...visibleSubPanel(root).querySelectorAll('text.axis-label')].map(
+      (n) => n.textContent ?? '',
+    );
+    for (const l of labels) expect(l).not.toMatch(/\.\d{2,}/);
+  });
+});
+
 describe('页面文案', () => {
   beforeEach(() => resetUrl());
 

@@ -35,6 +35,10 @@ import {
   type SubAttr,
 } from '../core/stats';
 import {
+  BUCKET_OPTIONS,
+  MAX_BARS,
+  autoBucketSize,
+  bucketize,
   scoreDistribution,
   pmfByHit,
   hitProbabilities,
@@ -45,6 +49,7 @@ import {
   tierLabel,
   type DistributionTable,
   type InitialRoll,
+  type ScoreBucket,
 } from '../core/growth';
 import {
   qualityDistribution,
@@ -575,7 +580,8 @@ export function mount(root: HTMLElement): void {
   /**
    * 左下角的成长值表：列出**当前参与计分的词条**的四个成长档位。
    *
-   * 这些数字是游戏里四舍五入过的，与官方实际使用的值可能有出入；
+   * 这些数字是**游戏内显示值**（只显示到一位小数）—— 不是我们取的整，
+   * 而是我们手上只有这个精度，所以累加后可能与官方的内部数值有细微出入。
    * 摆在界面上是为了让「分数是怎么来的」可核对，而不是藏在代码里。
    * 只列用到的词条，不把整张表糊上去。
    */
@@ -627,13 +633,29 @@ export function mount(root: HTMLElement): void {
   // Tab 1：得分分布
   // -------------------------------------------------------------------------
 
+  /**
+   * 当前生效的分桶宽度。
+   *
+   * `state.bucketSize === 0` 表示用户还没显式选过 —— 此时按「柱数 ≤ MAX_BARS」
+   * 自动挑一档，保证默认视图不会糊成一片。用户改过就一律听用户的（哪怕柱子很密）。
+   */
+  function effectiveBucketSize(): number {
+    if (state.bucketSize > 0) return state.bucketSize;
+    return autoBucketSize(lastScores);
+  }
+
+  /**
+   * 最近一次算出的分数序列，供 `effectiveBucketSize` 自动挑档用。
+   * 分桶选择器在「概率分布」子 tab 渲染时读它，所以 `update()` 要先于渲染把它写新。
+   */
+  let lastScores: number[] = [];
+
   const growthTab: Tab = {
     id: 'growth',
     label: C.TAB_GROWTH,
     blurb: C.GROWTH_BLURB,
 
-    controls(host) {
-      const form = node('form', { class: 'panel sticky', id: 'form' });
+    controls(host) {      const form = node('form', { class: 'panel sticky', id: 'form' });
       form.addEventListener('submit', (ev) => ev.preventDefault());
       form.append(panelHead(C.CONFIG, [resetBtn]));
 
@@ -669,8 +691,10 @@ export function mount(root: HTMLElement): void {
       const bar = node('div', { class: 'subtabs', role: 'tablist' });
 
       let table: DistributionTable | null = null;
-      let shares: StackedDatum[] = [];
       let hitLabels: string[] = [];
+      /** 分桶后的柱子；`bucketSize` 为「不合并」时就是逐分数 */
+      let bars: ScoreBucket[] = [];
+      let barsBucketed = false;
 
       const subs: SubTab[] = [
         {
@@ -681,13 +705,37 @@ export function mount(root: HTMLElement): void {
               C.SCORE_CHART_HINT,
             );
             p.box.classList.add('flush');
+
+            // 分桶选择器：柱数太多时把相邻分数并成一根柱子。
+            // 默认值由 autoBucketSize 按「柱数 ≤ MAX_BARS」算，用户改了就用用户的。
+            const tools = node('div', { class: 'chart-tools' });
+            const label = node('label', { class: 'inline-field' });
+            label.append(node('span', {}, C.BUCKET_LABEL));
+            const sel = node('select', { id: 'bucketSize' });
+            for (const size of BUCKET_OPTIONS) {
+              sel.append(
+                option(String(size), C.bucketSizeLabel(size), size === effectiveBucketSize()),
+              );
+            }
+            sel.value = String(effectiveBucketSize());
+            sel.addEventListener('change', () => {
+              setState({ bucketSize: Number(sel.value) });
+            });
+            label.append(sel);
+            tools.append(label, node('span', { class: 'hint' }, C.barCountHint(bars.length, barsBucketed)));
+            p.body.append(tools);
+
             const chart = node('div', { class: 'chart-wrap', id: 'scoreChart' });
             p.body.append(chart);
             box.append(p.box);
             if (!table) return;
             chart.append(
               renderScoreBars({
-                data: shares,
+                data: bars.map((b) => ({
+                  score: b.score,
+                  byHit: b.byHit,
+                  ...(barsBucketed ? { range: { min: b.minScore, max: b.maxScore } } : {}),
+                })),
                 hitLabels,
                 marker: {
                   score: state.targetScore,
@@ -795,11 +843,18 @@ export function mount(root: HTMLElement): void {
         }
 
         const byHit = pmfByHit(table);
-        shares = table.scores.map((s, i) => ({
-          score: s,
-          byHit: byHit.map((r) => r[i] ?? 0),
-        }));
         hitLabels = Array.from({ length: table.hitBuckets }, (_, h) => C.hitLabel(h));
+        // 先写新分数序列，下面 `effectiveBucketSize()` 才知道该自动挑哪一档
+        lastScores = table.scores;
+
+        // 分桶：柱数超过上限就自动合并（用户显式选过则按用户的）
+        const size = effectiveBucketSize();
+        barsBucketed = size > 0.1;
+        bars = bucketize(
+          table.scores,
+          table.scores.map((_, i) => byHit.map((row) => row[i] ?? 0)),
+          size,
+        );
 
         const p = probAtLeast(table, state.targetScore);
         const attempts = expectedAttempts(table, state.targetScore);
