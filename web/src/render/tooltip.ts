@@ -18,6 +18,8 @@ export interface TooltipRow {
 export interface TooltipContent {
   /** 标题（通常是「14.6 分」） */
   title: string;
+  /** 右上角的高亮数值（通常是概率）。标题行左、它右，对齐同一行 */
+  badge?: string;
   /** 副标题，省略则不画 */
   subtitle?: string;
   rows: TooltipRow[];
@@ -124,10 +126,20 @@ export class Tooltip {
 function build(content: TooltipContent): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  const title = document.createElement('div');
+  // 标题行：左边标题，右上角是高亮数值（概率）
+  const head = document.createElement('div');
+  head.className = 'tt-head';
+  const title = document.createElement('span');
   title.className = 'tt-title';
   title.textContent = content.title;
-  frag.append(title);
+  head.append(title);
+  if (content.badge) {
+    const badge = document.createElement('span');
+    badge.className = 'tt-badge';
+    badge.textContent = content.badge;
+    head.append(badge);
+  }
+  frag.append(head);
 
   if (content.subtitle) {
     const sub = document.createElement('div');

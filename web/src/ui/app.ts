@@ -722,7 +722,7 @@ export function mount(root: HTMLElement): void {
               setState({ bucketSize: Number(sel.value) });
             });
             label.append(sel);
-            tools.append(label, node('span', { class: 'hint' }, C.barCountHint(bars.length, barsBucketed)));
+            tools.append(label);
             p.body.append(tools);
 
             const chart = node('div', { class: 'chart-wrap', id: 'scoreChart' });

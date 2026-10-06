@@ -366,35 +366,6 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
   const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
   f.plot.append(guide);
 
-  // 悬停柱的概率角标：**固定在绘图区右上角**并高亮。
-  //
-  // 原来这行概率放在浮框的副标题里（「落在这个区间的概率 2.20%」），又长又和分档明细
-  // 抢注意力；改到柱顶右上角又会被**跟着光标的浮框**盖住（实测如此）。
-  // 固定在角落两个问题都没有：位置不随鼠标动、读数稳定，也不与浮框重叠。
-  const badgeText = text('', { class: 'bar-badge-text', x: 0, y: 0, 'text-anchor': 'end' });
-  const badgeBg = el('rect', { class: 'bar-badge-bg', x: 0, y: 0, width: 0, height: 16, rx: 4 });
-  const badge = el('g', { class: 'bar-badge' });
-  badge.append(badgeBg, badgeText);
-  badge.setAttribute('visibility', 'hidden');
-  f.plot.append(badge);
-
-  function showBadge(label: string): void {
-    badgeText.textContent = label;
-    // SVG 没有自适应的气泡，先量一次文字宽度
-    const w = badgeText.getBBox?.().width ?? label.length * 7.5;
-    const h = 16;
-    const boxW = w + 12;
-    const right = f.plotW;
-    // 贴顶端再往下让一格：最高的那根柱子不会被它压住
-    const top = Math.max(f.plotH - h, 0);
-    badgeBg.setAttribute('x', String(right - boxW));
-    badgeBg.setAttribute('y', String(top));
-    badgeBg.setAttribute('width', String(boxW));
-    badgeBg.setAttribute('height', String(h));
-    badgeText.setAttribute('x', String(right - 6));
-    badgeText.setAttribute('y', String(top + h - 4.5));
-    badge.setAttribute('visibility', 'visible');
-  }
 
   data.forEach((d, i) => {
     const x = xOf(i);
@@ -410,14 +381,17 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      const label = pct(totals[i]!);
-      showBadge(label);
-      // 浮框锚在**柱顶**（和竖线同一个位置），不跟鼠标 —— 跟鼠标会和竖线错开
-      tooltip.showAt(f.svg, x, yOf(totals[i]!), scoreTooltip(d, totals[i]!, hitLabels, i, data.length), 'right');
+      // 浮框锚在**柱顶**（与竖线同一位置）：竖线、浮框、数据点必须是一套坐标。
+      // 概率写在浮框标题行的右上角（badge），不再另设图内角标。
+      tooltip.showAt(
+        f.svg,
+        x,
+        yOf(totals[i]!),
+        scoreTooltip(d, totals[i]!, hitLabels, i, data.length),
+      );
     });
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
-      badge.setAttribute('visibility', 'hidden');
       tooltip.hide();
     });
     f.plot.append(hit);
@@ -432,7 +406,7 @@ function scoreTooltip(
   hitLabels: string[],
   i: number,
   count: number,
-): { title: string; rows: TooltipRow[]; footer?: string } {
+): { title: string; badge: string; rows: TooltipRow[]; footer?: string } {
   // 只有一根柱子时不必说「占本柱的 100%」——那是废话
   const only = d.byHit.filter((p) => p > 0).length === 1;
   const rows: TooltipRow[] = [];
@@ -450,6 +424,7 @@ function scoreTooltip(
   const bucketed = d.range !== undefined && d.range.min !== d.range.max;
   return {
     title: bucketed ? bucketRangeLabel(d) : `${d.score.toFixed(1)} 分`,
+    badge: pct(total),
     rows,
     // 概率已经标在柱子右上角了，这里不再重复；脚注只留给「第几根」
     footer: bucketed
@@ -557,16 +532,16 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   const dot = el('circle', { class: 'hover-dot', r: 4.5, cx: -99, cy: -99 });
   f.plot.append(guide, dot);
 
-  const localX = plotLocalXMaper(f.plot);
+  const localPoint = plotLocalPoint(f.plot);
   const pick = (ev: MouseEvent): number => {
-    const x = localX?.(ev.clientX);
-    if (x === null || x === undefined) {
+    const p = localPoint?.(ev.clientX, ev.clientY);
+    if (!p) {
       // 退不到几何量算时（未挂载 / jsdom），用事件在组内的偏移比例兜底
       const box = f.plot.getBoundingClientRect();
       const ratio = box.width > 0 ? (ev.clientX - box.left) / box.width : 0;
       return Math.max(0, Math.min(scores.length - 1, Math.floor(ratio * scores.length)));
     }
-    const i = Math.floor(x / bandW);
+    const i = Math.floor(p.x / bandW);
     return Math.max(0, Math.min(scores.length - 1, i));
   };
 
@@ -745,21 +720,32 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 // ---------------------------------------------------------------------------
 
 /**
- * 把鼠标的视口横坐标换算成「绘图区局部横坐标」。
+ * 把鼠标的视口坐标换算成**绘图区局部坐标**。
  *
- * 用「屏幕像素 → 局部单位」的线性比例，而不是 `getScreenCTM().inverse()`：
- * SVG 在 CSS 下等比缩放时两者等价，而比例法在 jsdom 里也能拿到可用值。
- * 取不到尺寸（未挂载）时返回 `null`，调用方自己退化。
+ * **必须用 `getScreenCTM()` 的逆矩阵**，不能自己算 `svgBox.width / viewBox.width`：
+ * `svg.chart { width: 100% }` 会把 viewBox 横向拉伸到容器宽度（横竖比例不同），
+ * 用「平均缩放比」在右侧会越走越偏。
+ *
+ * 曾经就是这么错的：viewBox 898 宽、绘图区实际 934px，于是光标放到最右时
+ * 命中的是第 86 根柱子而不是第 84 根，**屏幕上差一百多像素**。
+ * 逆矩阵是浏览器命中测试用的同一套变换，天然对齐，也顺带处理了 `viewBox` 偏移。
+ *
+ * 取不到 CTM（jsdom、未挂载）时返回 `null`，调用方自己退化。
  */
-function plotLocalXMaper(plot: SVGGElement): ((clientX: number) => number | null) | null {
+function plotLocalPoint(
+  plot: SVGGElement,
+): ((clientX: number, clientY: number) => { x: number; y: number } | null) | null {
   const svg = plot.ownerSVGElement;
   if (!svg) return null;
-  return (clientX: number): number | null => {
-    const svgBox = svg.getBoundingClientRect();
-    const plotBox = plot.getBoundingClientRect();
-    if (!svgBox.width || !plotBox.width) return null;
-    const scale = svgBox.width / (svg.viewBox.baseVal.width || svgBox.width);
-    return (clientX - plotBox.left) / scale;
+  return (clientX: number, clientY: number) => {
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const p = pt.matrixTransform(ctm.inverse());
+    // p 是「绘图区局部坐标」：CTM 里已含 `<g transform="translate(left, top)">`
+    return { x: p.x, y: p.y };
   };
 }
 

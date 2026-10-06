@@ -422,19 +422,6 @@ svg.chart { display: block; width: 100%; height: auto; }
 }
 .guide.on { opacity: .55; }
 
-/* 悬停柱的概率角标：贴在柱顶，高亮 */
-.bar-badge { pointer-events: none; }
-.bar-badge-bg {
-  fill: var(--accent-soft);
-  stroke: var(--accent);
-  stroke-width: 1.2;
-}
-.bar-badge-text {
-  fill: var(--accent);
-  font-size: 11.5px;
-  font-weight: 700;
-  font-family: var(--mono);
-}
 
 .series-line { fill: none; stroke: #2563eb; stroke-width: 2; stroke-linejoin: round; }
 .series-area { fill: rgb(37 99 235 / 10%); stroke: none; }
@@ -501,7 +488,17 @@ svg.pie .pie-slice:hover { opacity: 1; }
   font-size: 12.5px;
   line-height: 1.5;
 }
+/* 标题行：左边标题、右上角高亮数值（概率） */
+.tt-head { display: flex; align-items: baseline; gap: 12px; }
 .tt-title { font-weight: 650; font-family: var(--mono); }
+.tt-badge {
+  margin-left: auto;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .tt-sub { color: var(--text-dim); font-size: 11.5px; margin-bottom: 6px; }
 .tt-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
 .tt-row { display: flex; align-items: center; gap: 7px; }

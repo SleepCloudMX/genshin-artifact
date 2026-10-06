@@ -89,9 +89,7 @@ export const BUCKET_NONE = '不分桶';
 export function bucketSizeLabel(size: number): string {
   return size <= 0.1 ? BUCKET_NONE : String(size);
 }
-export function barCountHint(bars: number, bucketed: boolean): string {
-  return bucketed ? `已合并为 ${bars} 根柱子` : `${bars} 根柱子`;
-}
+
 
 // ---------------------------------------------------------------------------
 // 指标卡

@@ -535,10 +535,6 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     return visibleSubPanel(root).querySelector<HTMLSelectElement>('#bucketSize')!;
   }
 
-  /** 控件旁那句「N 根柱子 / 已合并为 N 根柱子」 */
-  function barCountText(root: HTMLElement): string {
-    return visibleSubPanel(root).querySelector('.chart-tools .hint')!.textContent ?? '';
-  }
 
   it('分桶下拉的档位是 0.1/0.2/0.5/1/2/5', () => {
     const root = freshRoot();
@@ -553,12 +549,17 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     ]);
   });
 
+  /** 图上柱子根数（按热区数算） */
+  function barCount(root: HTMLElement): number {
+    return visibleSubPanel(root).querySelectorAll('#scoreChart rect.hot-rect').length;
+  }
+
   it('柱数没超上限时不分桶', () => {
     const root = freshRoot();
     mount(root);
     // 默认配置只有 87 个可能分数
     expect(bucketSelect(root).value).toBe('0.1');
-    expect(barCountText(root)).toMatch(/^\d+ 根柱子$/);
+    expect(barCount(root)).toBe(87);
   });
 
   it('柱数超过 100 时自动挑一档分桶，且柱数落回上限内', () => {
@@ -568,9 +569,7 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     setSelect(attrSelects(root)[2]!, '充能');
     setSelect(attrSelects(root)[3]!, '精通');
 
-    const bars = Number(barCountText(root).match(/\d+/)![0]);
-    expect(bars).toBeLessThanOrEqual(100);
-    expect(barCountText(root)).toContain('已合并');
+    expect(barCount(root)).toBeLessThanOrEqual(100);
     expect(Number(bucketSelect(root).value)).toBeGreaterThan(0.1);
   });
 
@@ -580,7 +579,7 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     const sel = bucketSelect(root);
     setSelect(sel, '2');
     expect(bucketSelect(root).value).toBe('2');
-    expect(barCountText(root)).toContain('已合并');
+    expect(barCount(root)).toBeLessThan(87);
 
     // 往返：bucket 参数能读回来
     const s = { ...defaultState(), bucketSize: 2 };
@@ -590,12 +589,10 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     expect(fromQuery('?' + toQuery({ ...defaultState(), bucketSize: 0 })).bucketSize).toBe(0);
   });
 
-  it('分桶后悬停框写的是区间而不是单点', () => {
+  it('分桶后轴标号仍是 0.1 网格（不带浮点毛刺）', () => {
     const root = freshRoot();
     mount(root);
     setSelect(bucketSelect(root), '2');
-    // 柱子上不再有逐分数的 title，区间信息由浮框承载；
-    // 这里只验证结构：柱子数变少、且轴标号仍是 0.1 网格
     const labels = [...visibleSubPanel(root).querySelectorAll('text.axis-label')].map(
       (n) => n.textContent ?? '',
     );

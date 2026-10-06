@@ -114,20 +114,10 @@ describe('得分分布堆叠柱', () => {
     expect(labels.some((l) => l?.includes('累积'))).toBe(false);
   });
 
-  it('悬停柱有概率角标，初始隐藏', () => {
-    const svg = renderScoreBars({
-      data: makeData(10),
-      hitLabels: HIT_LABELS,
-      title: 't',
-      tooltip: makeTooltip(),
-    });
-    const badge = svg.querySelector('g.bar-badge');
-    expect(badge).not.toBeNull();
-    expect(badge!.getAttribute('visibility')).toBe('hidden');
-    expect(badge!.querySelector('.bar-badge-text')).not.toBeNull();
-  });
-
-  /** 挂一个浮框、渲染图、悬停第 i 根柱子，返回浮框里的文案 */
+  /**
+   * 挂一个浮框渲染得分分布图，并悬停第 i 根柱子。
+   * 派发 `mouseenter`（监听挂在 enter 上，不是 `mousemove`）。
+   */
   function hoverBar(
     data: { score: number; range?: { min: number; max: number }; byHit: number[] }[],
     i: number,
@@ -139,50 +129,34 @@ describe('得分分布堆叠柱', () => {
     host.append(svg);
     svg
       .querySelectorAll('rect.hot-rect')
-      [i]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 10, clientY: 10 }));
+      [i]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     return { host, svg };
   }
 
-  it('悬停柱有概率角标，初始隐藏、悬停后显示并写概率', () => {
+  it('概率写在浮框标题行的右上角（badge），高亮', () => {
+    const { host } = hoverBar(makeData(5), 2);
+    const head = host.querySelector('.tooltip .tt-head')!;
+    expect(head).not.toBeNull();
+    expect(head.querySelector('.tt-title')!.textContent).toBe('10.2 分');
+    const badge = head.querySelector('.tt-badge')!;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toMatch(/%$/);
+  });
+
+  it('图上不再另设概率角标（概率只在浮框里）', () => {
     const svg = renderScoreBars({
       data: makeData(10),
       hitLabels: HIT_LABELS,
       title: 't',
       tooltip: makeTooltip(),
     });
-    const badge = svg.querySelector('g.bar-badge')!;
-    expect(badge.getAttribute('visibility')).toBe('hidden');
-
-    const { host } = hoverBar(makeData(10), 0);
-    expect(host.querySelector('g.bar-badge')!.getAttribute('visibility')).toBe('visible');
-    expect(host.querySelector('.bar-badge-text')!.textContent).toMatch(/%$/);
+    expect(svg.querySelector('.bar-badge, .bar-badge-text, .bar-badge-bg')).toBeNull();
   });
-
-  it('角标固定在绘图区右上角 —— 不跟着柱子走', () => {
-    // 悬停不同的柱子，角标位置必须完全一致（只换文字）
-    const at = (i: number) => {
-      const { host } = hoverBar(makeData(12), i);
-      const bg = host.querySelector('.bar-badge-bg')!;
-      return `${bg.getAttribute('x')},${bg.getAttribute('y')}`;
-    };
-    expect(at(0)).toBe(at(11));
-    expect(at(5)).toBe(at(0));
-
-    // 贴着绘图区右边。角标在 `<g transform="translate(left, top)">` 内，
-    // 所以绝对 x 要算上左边距：右边界 = viewBox 宽 − 右边距 18 − 左边距 52
-    const { host, svg } = hoverBar(makeData(12), 3);
-    const bg = host.querySelector('.bar-badge-bg')!;
-    const viewW = Number(svg.getAttribute('viewBox')!.split(' ')[2]);
-    expect(Number(bg.getAttribute('x')) + Number(bg.getAttribute('width'))).toBeCloseTo(
-      viewW - 18 - 52,
-      0,
-    );
-  });
-
-  it('浮框不再重复写概率（已经标在角标上了）', () => {
+  it('浮框里不再有啰嗦的「落在这个区间的概率 …」那行', () => {
     const { host } = hoverBar(makeData(5), 2);
-    const titles = [...host.querySelectorAll('.tooltip > div')].map((n) => n.textContent ?? '');
-    expect(titles.some((s) => s.includes('概率'))).toBe(false);
+    const text = host.querySelector('.tooltip')!.textContent ?? '';
+    expect(text).not.toContain('落在');
+    expect(text).not.toContain('恰好等于');
     // 分档明细还在
     expect(host.querySelectorAll('.tooltip .tt-row').length).toBeGreaterThan(0);
   });
