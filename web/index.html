@@ -5,9 +5,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>圣遗物词条概率分布</title>
     <meta name="description" content="原神五星圣遗物副词条的概率分布计算器：给定主词条与计分权重，算出胚子练满后的得分分布。" />
+    <style>
+      /* 启动前的最小样式，避免出现无样式的白屏闪烁。
+         这段样式会被 Vite 保留在产物里，所以即使 JS 被拦也看得见提示。 */
+      html, body { margin: 0; background: #0b1020; color: #e6ecf7;
+        font-family: system-ui, "Microsoft YaHei", "PingFang SC", sans-serif; }
+      .boot { max-width: 660px; margin: 12vh auto; padding: 0 22px; line-height: 1.75; }
+      .boot h1 { font-size: 20px; margin: 0 0 10px; }
+      .boot code { background: #16203a; padding: 1px 6px; border-radius: 5px;
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+      .boot .dim { color: #9aa8c3; font-size: 14px; }
+      #boot-error { display: none; }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot" id="boot-hint">
+        <h1>正在加载…</h1>
+        <p class="dim">
+          若这一行一直不消失，说明页面脚本没能加载。<br />
+          直接用 <code>file://</code> 打开时，浏览器会拦截 ES module（CORS 限制）。
+        </p>
+      </div>
+      <div class="boot" id="boot-error">
+        <h1>脚本没能加载</h1>
+        <p class="dim">
+          本页面的全部计算都在浏览器里完成，需要一个能提供页面的地址。请任选一种：<br /><br />
+          <b>1. 本地服务器</b>（在本目录执行，然后访问 <code>http://localhost:8000/</code>）<br />
+          <code>python -m http.server 8000</code><br /><br />
+          <b>2. 用自包含版本</b>：仓库根的 <code>index.html</code> 由 <code>pnpm build</code>
+          生成，已把 JS/CSS 内联进同一个文件，双击即可打开。
+        </p>
+      </div>
+    </div>
+    <noscript>
+      <div class="boot">
+        <h1>需要启用 JavaScript</h1>
+        <p class="dim">本页面的全部计算都在浏览器里完成。</p>
+      </div>
+    </noscript>
+    <script>
+      // 兜底：若 module 脚本没能执行（file:// 被 CORS 拦、或加载失败），
+      // 把「正在加载…」换成可操作的指引，而不是留一个空白页。
+      setTimeout(function () {
+        var app = document.getElementById('app');
+        if (!app || app.dataset.mounted === '1') return;
+        var hint = document.getElementById('boot-hint');
+        if (hint) hint.style.display = 'none';
+        var err = document.getElementById('boot-error');
+        if (err) err.style.display = 'block';
+      }, 1200);
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
