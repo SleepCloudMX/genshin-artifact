@@ -5,18 +5,24 @@
  * `<script type="module" src="...">`，页面会变成空白。
  *
  * 做法（不引入额外依赖，见 `02-refactor.md` 关于「不要为一个需求加依赖」）：
- *   1. Vite 先正常产出 `index.html` + `./assets/*.js|css`（外部文件仍保留，便于对照）；
- *   2. 本插件在 `closeBundle` 阶段读取这两个文件，插进 HTML 的
- *      `<script type="module">` 与 `<style>`；
- *   3. **删掉外部的 `<script src>` / `<link rel=stylesheet>` 引用**——
+ *   1. Vite 正常打包，产出 `index.html` + `assets/*.js|css`；
+ *   2. 本插件在 `generateBundle` 阶段**直接取走** chunk 的 `code` 与 css asset 的
+ *      `source`，并把这些条目从 bundle 里删掉 —— **于是 JS/CSS 根本不落盘**；
+ *   3. `closeBundle` 阶段改写 `index.html`：插进 `<script type="module">` 与 `<style>`；
+ *   4. **删掉外部的 `<script src>` / `<link rel=stylesheet>` 引用**——
  *      留着的话，服务器托管时内联脚本与外部脚本都会执行，界面会被挂载两次；
- *   4. 内联内容里的 `</script` 必须转义成 `<\/script`，否则 HTML 解析器
+ *   5. 内联内容里的 `</script` 必须转义成 `<\/script`，否则 HTML 解析器
  *      会在字符串字面量中间提前闭合脚本标签，整段 JS 变成语法错误（白屏）。
- *   5. **绝不能用字符串形式的替换值**（`html.replace(x, js)`）：
+ *   6. **绝不能用字符串形式的替换值**（`html.replace(x, js)`）：
  *      `String.prototype.replace` 会把替换值里的 `$&`、`` $` ``、`$'` 当成特殊模式。
  *      压缩后的 JS 里正好有 `$(...)` 这种变量名，`$&` 一旦出现就会把
  *      **匹配到的原文**（这里是 `</body>`）插进代码里，直接制造语法错误。
  *      必须传函数形式的替换器。
+ *
+ * 为什么不让 JS/CSS 落盘（曾经的写法是写完再读回来）：
+ * 产物是**自包含单文件**，`index.html` 里没有任何外部引用，所以 `assets/` 是
+ * **没人引用的构建垃圾** —— 每构建一次多两个哈希文件名的新文件，旧的从不清，
+ * 既不是交付物也不可复现（一次性产物）。取内容的位置本来就在手里，没必要绕磁盘。
  *
  * 于是：
  *   - `file://` 双击打开 → 走内联代码，正常渲染；
@@ -53,9 +59,10 @@ export function replaceOnce(text: string, anchor: string, value: string): string
  */
 export function inlineBundle() {
   let outDir = 'dist';
-  let htmlFiles: string[] = [];
-  let jsFile: string | undefined;
-  let cssFile: string | undefined;
+  let htmlFile = 'index.html';
+  /** 打包好的 JS / CSS 内容。在 `generateBundle` 里取走，不让它们落盘 */
+  let js: string | undefined;
+  let css: string | undefined;
 
   return {
     name: 'artifact-growth:inline-bundle',
@@ -67,30 +74,40 @@ export function inlineBundle() {
 
     generateBundle(
       _options: unknown,
-      bundle: Record<string, { type: string; isEntry?: boolean; fileName: string }>,
+      bundle: Record<string, { type: string; isEntry?: boolean; fileName: string; code?: string; source?: string | Uint8Array }>,
     ) {
+      const drop: string[] = [];
       for (const fileName of Object.keys(bundle)) {
         const item = bundle[fileName]!;
-        if (item.type === 'chunk' && item.isEntry) jsFile = fileName;
-        else if (item.type === 'asset' && fileName.endsWith('.css')) cssFile = fileName;
-        else if (item.type === 'asset' && fileName.endsWith('.html')) htmlFiles.push(fileName);
+        if (item.type === 'chunk' && item.isEntry) {
+          js = item.code;
+          drop.push(fileName);
+        } else if (item.type === 'asset' && fileName.endsWith('.css')) {
+          css = typeof item.source === 'string' ? item.source : undefined;
+          drop.push(fileName);
+        } else if (item.type === 'asset' && fileName.endsWith('.html')) {
+          htmlFile = fileName;
+        }
       }
+      // 从 bundle 里删掉 = Rollup 不写这两个文件；内容已经在上面的 `js` / `css` 里
+      for (const fileName of drop) delete bundle[fileName];
     },
 
     closeBundle() {
-      const htmlRel = htmlFiles[0] ?? 'index.html';
-      const htmlPath = join(outDir, htmlRel);
+      const htmlPath = join(outDir, htmlFile);
       let html = readFileSync(htmlPath, 'utf8');
 
-      if (cssFile) {
-        const css = readFileSync(join(outDir, cssFile), 'utf8');
+      if (css !== undefined) {
         const next = replaceOnce(html, '</head>', `<style>\n${css}\n</style>\n</head>`);
         if (next === undefined) throw new Error('inline-bundle: 找不到 </head>');
         html = next;
       }
-      if (jsFile) {
-        const js = escapeScriptText(readFileSync(join(outDir, jsFile), 'utf8'));
-        const next = replaceOnce(html, '</body>', `<script type="module">\n${js}\n</script>\n</body>`);
+      if (js !== undefined) {
+        const next = replaceOnce(
+          html,
+          '</body>',
+          `<script type="module">\n${escapeScriptText(js)}\n</script>\n</body>`,
+        );
         if (next === undefined) throw new Error('inline-bundle: 找不到 </body>');
         html = next;
       }
@@ -103,7 +120,7 @@ export function inlineBundle() {
 
       writeFileSync(htmlPath, html, 'utf8');
       const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(1);
-      console.log(`\n  自包含产物：${htmlRel}（${kb} kB，已内联 JS/CSS，可双击打开）`);
+      console.log(`\n  自包含产物：${htmlFile}（${kb} kB，已内联 JS/CSS，可双击打开）`);
     },
   };
 }

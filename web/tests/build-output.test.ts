@@ -66,6 +66,15 @@ describe.skipIf(!hasBuild)('构建产物自包含', () => {
     expect(/<link\b[^>]*\brel=["']?stylesheet/i.test(html), '残留 <link rel=stylesheet>').toBe(false);
   });
 
+  it('构建不再产出 assets/（产物是自包含单文件，那些文件没人引用）', () => {
+    // 曾经的写法是「Vite 写盘 → 插件读回来内联」，于是每次构建都在 assets/ 里
+    // 多留两个哈希文件名的死文件（攒到过 38 个 / 1.1 MB）。
+    // 现在 JS/CSS 在 generateBundle 阶段就被取走并从 bundle 里删掉，不落盘。
+    expect(existsSync(join(REPO_ROOT, 'assets')), 'assets/ 又被产出了').toBe(false);
+    // 产物里当然也不能再引用它
+    expect(/["'(]\.?\/?assets\//i.test(html), '产物里引用了 assets/').toBe(false);
+  });
+
   it('内联脚本不含顶层 import / export', () => {
     expect(/^\s*import[\s{]/m.test(inline), '内联脚本里残留 import').toBe(false);
     expect(/^\s*export[\s{]/m.test(inline), '内联脚本里残留 export').toBe(false);
