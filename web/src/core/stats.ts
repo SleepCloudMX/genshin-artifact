@@ -72,6 +72,37 @@ export const GROWTHS: Record<SubAttr, readonly [number, number, number, number]>
 /** 五星圣遗物满级 +20 的副词条成长次数 */
 export const UPGRADE_COUNT = 5;
 
+/**
+ * 主词条与副词条「同一条词条但写法不同」的别名。
+ *
+ * 归档 `init_stats.get_stats()` 的 `头` 部位写的是 `爆伤`（爆 U+7206），
+ * 而副词条池里写的是 `暴伤`（暴 U+66B4）—— 游戏里这是同一条词条（暴击伤害）。
+ * 主词条概率表只把键当标签用，所以归档里这个不一致没有影响；
+ * 但「主词条不能出现在副词条里」这条规则要求把它们认成同一个词条，
+ * 否则 `爆伤` 主词条的副词条池会错误地多出 `暴伤`。
+ *
+ * 注意：**不要**把这个别名塞进 `combo.poolOf`——那会改变 `attrsProb` 的语义，
+ * 与 `__fixtures__/baseline.json` 的回归基线冲突。别名只在下面这个辅助函数里生效。
+ */
+export const MAIN_ATTR_ALIAS: Partial<Record<MainAttr, SubAttr>> = { 爆伤: '暴伤' };
+
+/**
+ * 主词条会从副词条池里排除掉的副词条。
+ * 主词条不是副词条（元素伤害 / 物伤 / 治疗）时返回 `undefined`。
+ */
+export function excludedSubstat(mainAttr: MainAttr): SubAttr | undefined {
+  if ((SUB_ATTRS as readonly string[]).includes(mainAttr)) return mainAttr as SubAttr;
+  return MAIN_ATTR_ALIAS[mainAttr];
+}
+
+/**
+ * 把主词条规范化为「副词条池里对应的那一条」。
+ * 只有 `爆伤` → `暴伤` 这一种情况会变化，其余原样返回。
+ */
+export function canonicalMainAttr(mainAttr: MainAttr): MainAttr {
+  return excludedSubstat(mainAttr) ?? mainAttr;
+}
+
 /** 按部位取主词条概率表 */
 export function mainProbabilities(position: Position): { attr: MainAttr; p: number }[] {
   const weights = MAIN_WEIGHTS[position];

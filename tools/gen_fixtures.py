@@ -1,18 +1,21 @@
 """从前端移植基准（src/artifact_growth/）导出 JSON 固件，供 vitest 对拍。
 
 运行（在项目根目录）：
-    python -X utf8 tools/gen_fixtures.py
+    python -X utf8 tools/gen_fixtures.py              # 全部
+    python -X utf8 tools/gen_fixtures.py quality      # 只导出 quality.json
 
 产物写入 web/src/core/__fixtures__/：
     stats.json          —— 副词条权重、主词条概率表
     combo.json          —— calc_attrs_prob 全组合、all_possible_attrs_prob 抽样
     growth.json         —— calc_score_dist 在若干用例上的稠密表（权重与概率）
-    quality.json        —— 胚子得分分布（init_stats 侧）
+    quality.json        —— 胚子得分分布 + 主词条→副词条概率矩阵（init_stats 侧）
+
+注意：**不要删除 `baseline.json`**。那份固件由前端权威实现自己导出
+（`cd web; pnpm gen:baseline`），是回归基线；本脚本只负责导出归档侧的交叉验证固件。
 """
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from itertools import combinations
 from pathlib import Path
@@ -126,7 +129,12 @@ QUALITY_CASES = [
     ('暴伤', {'暴击': 3, '精通': 2, '大攻击': 2, '充能': 1}),
     ('火伤', {'暴击': 3, '暴伤': 3, '精通': 2, '大攻击': 2, '充能': 1}),
     ('小生命', {'暴击': 3, '暴伤': 3, '充能': 1}),
+    ('大攻击', {'暴击': 1, '暴伤': 1}),
+    ('充能', {'暴击': 1, '暴伤': 1, '大攻击': 0.5, '精通': 0.5}),
 ]
+
+# 热力图的样本主词条：7 个「能当主词条」的副词条 + 「其他」（元素伤害 / 物伤 / 治疗 / 爆伤）
+HEATMAP_MAINS = ['大生命', '大防御', '大攻击', '充能', '精通', '暴击', '暴伤', '其他']
 
 
 def gen_quality() -> dict:
@@ -144,20 +152,39 @@ def gen_quality() -> dict:
             'combos': [{'combo': sorted(c), 'p': p} for c, p in comb_prob.items()],
             'byScore': {str(k): v for k, v in sorted(by_score.items())},
         })
-    return {'cases': cases}
+
+    # 主词条 → 副词条概率（get_sub_probs 只做「从池里剔掉主词条再归一化」，
+    # 不计入不放回抽样的 4 次抽取；终态概率见 calc_attrs_prob）
+    heatmap = []
+    for main_attr in HEATMAP_MAINS:
+        sub_probs = IS.get_sub_probs(main_attr)
+        heatmap.append({
+            'mainAttr': main_attr,
+            'probs': {k: v for k, v in sub_probs.items()},
+            'sum': sum(sub_probs.values()),
+        })
+
+    return {'cases': cases, 'heatmap': heatmap}
 
 
-def main() -> None:
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    OUT.mkdir(parents=True)
+def main(only: list[str] | None = None) -> None:
+    # 注意：**不能** rmtree 整个目录 —— baseline.json 由 `pnpm gen:baseline` 生成，删了就丢基线。
+    OUT.mkdir(parents=True, exist_ok=True)
     files = {
-        'stats.json': gen_stats(),
-        'combo.json': gen_combo(),
-        'growth.json': gen_growth(),
-        'quality.json': gen_quality(),
+        'stats.json': gen_stats,
+        'combo.json': gen_combo,
+        'growth.json': gen_growth,
+        'quality.json': gen_quality,
     }
-    for name, data in files.items():
+    if only:
+        wanted = {f'{name}.json' for name in only}
+        unknown = wanted - set(files)
+        if unknown:
+            raise SystemExit(f'未知的固件名：{sorted(unknown)}；可选 {sorted(files)}')
+        files = {k: v for k, v in files.items() if k in wanted}
+
+    for name, gen in files.items():
+        data = gen()
         p = OUT / name
         p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
         print(f'{name:16s} {p.stat().st_size:>9,d} bytes  '
@@ -166,4 +193,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])
