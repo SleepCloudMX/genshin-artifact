@@ -10,6 +10,3 @@ temp/
 # 前端
 node_modules/
 web/dist/
-
-# 独立 git 管理的文档仓库
-docs/
