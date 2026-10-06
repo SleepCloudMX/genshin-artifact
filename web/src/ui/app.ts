@@ -1,20 +1,27 @@
 /**
  * 界面装配。
  *
- * ## 结构：配置属于任务
+ * ## 结构
  *
- * 每个 tab（= 一个**独立问题**）自带左右两栏：
- *   - 左栏 `controls(host)`：**这个任务需要什么配置**；
- *   - 右栏 `mount(host)` + `update()`：结果。
+ * 顶部是标题栏（标题 + 主题图标）。下面是左右两栏：
+ *   - 左栏：**当前 tab 的**配置（`Tab.controls`）；
+ *   - 右栏：结果，再按**子 tab** 分页——每张图一个子 tab，切换即可，不用滚动。
  *
- * 这不是「同一个问题的不同画法」，所以配置也各不相同：
- *   - 「得分分布」要 主词条 / 副词条与权重 / 初始档位 / 初始词条数 / 目标分数；
- *   - 「胚子质量」只关心掉落那一刻，**问它「掉落时可见几条」没有意义**，所以不问。
+ * ## 为什么配置按 tab 分
  *
- * 共享的是**评分标准**（主词条 + 哪些副词条计分），换任务不该丢；
- * 任务特有的输入（初始词条数、目标分数）各自持有。详见 `ui/state.ts` 的类型划分。
+ * 每个主 tab 是一个**独立问题**，需要的输入本来就不同：
+ *   - 「得分分布」要 主词条 / 初始词条数 / 副词条与档位 / 目标分数；
+ *   - 「胚子质量」只看掉落那一刻，问它「初始几条」没有意义。
+ * 共享的只有**评分标准**（主词条 + 哪些副词条计分），换任务不该丢。
+ * 详见 `ui/state.ts` 的两级类型划分。
  *
- * 界面只负责收集输入与展示结果，全部数学都在 `src/core/`，可单独测试。
+ * ## 子 tab 的刷新契约
+ *
+ * 「只渲染当前可见的那个子 tab」省掉了隐藏图表的计算，代价是需要一个明确的刷新入口：
+ * 各 tab 的 `update()` 算完数据后调 `sub.refresh()`。切换子 tab 时也要调一次，
+ * 否则新露出来的那张图还是上一次的内容（或空白）。
+ *
+ * 全部数学都在 `src/core/`，界面只负责收集输入与展示结果。
  */
 
 import { MAIN_ATTRS, type MainAttr, type SubAttr } from '../core/stats';
@@ -46,11 +53,14 @@ import {
 import { renderPie } from '../render/pie';
 import { Tooltip } from '../render/tooltip';
 import {
-  defaultShared,
   defaultGrowth,
+  defaultShared,
   fromQuery,
   toQuery,
   isExcludedByMain,
+  nextWeightDown,
+  nextWeightUp,
+  weightOnSelect,
   selectableAttrs,
   toSpec,
   weightMap,
@@ -60,6 +70,7 @@ import {
   type SlotInput,
 } from './state';
 import { oneIn, pct, score as fmtScore } from './format';
+import * as C from './copy';
 
 // ---------------------------------------------------------------------------
 // DOM 小工具
@@ -78,11 +89,11 @@ function node<K extends keyof HTMLElementTagNameMap>(
 
 function option(value: string, label: string, selected: boolean): HTMLOptionElement {
   const el = node('option', { value }, label);
-  if (selected) el.selected = true;
+  el.selected = selected;
   return el;
 }
 
-/** 一行「标签 + 控件」 */
+/** 「标签 + 控件」的一行 */
 function field(labelText: string, control: HTMLElement): HTMLLabelElement {
   const box = node('label', { class: 'field' });
   box.append(node('span', {}, labelText), control);
@@ -97,43 +108,113 @@ function card(label: string, value: string, note?: string): HTMLElement {
   return box;
 }
 
-/** 表格：`heads` + 每次 `rows` 调用重建 tbody */
-function dataTable(heads: string[], id?: string): { table: HTMLTableElement; body: HTMLTableSectionElement } {
+/** 面板 = 标题 +（可选）说明 + 内容 */
+function panel(title: string, hint?: string): { box: HTMLElement; body: HTMLElement } {
+  const box = node('section', { class: 'panel' });
+  if (title) box.append(node('h2', {}, title));
+  if (hint) box.append(node('p', { class: 'hint' }, hint));
+  const body = node('div', { class: 'panel-body' });
+  box.append(body);
+  return { box, body };
+}
+
+/** 表格：`heads` 固定，`body` 每次重建 */
+function dataTable(
+  heads: string[],
+  id?: string,
+): { table: HTMLTableElement; body: HTMLTableSectionElement } {
   const table = node('table', { class: 'data', ...(id ? { id } : {}) });
   const thead = node('thead');
   const tr = node('tr');
   for (const h of heads) tr.append(node('th', {}, h));
   thead.append(tr);
-  const tbody = node('tbody');
-  table.append(thead, tbody);
-  return { table, body: tbody };
+  const body = node('tbody');
+  table.append(thead, body);
+  return { table, body };
+}
+
+function row(cells: string[]): HTMLTableRowElement {
+  const tr = node('tr');
+  for (const c of cells) tr.append(node('td', {}, c));
+  return tr;
 }
 
 // ---------------------------------------------------------------------------
-// 共享控件：主词条、副词条表（词条 / 权重 / 初始档位）
+// 主题图标
 // ---------------------------------------------------------------------------
 
-/** 权重一步的幅度。权重口径都很小（0.1～2），0.1 用起来最顺手 */
-const WEIGHT_STEP = 0.1;
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** 初始档位的 5 个选项：随机 + 四档 */
+/** 太阳 / 月亮图标。用 SVG 而不是字符，跨平台字形不会有差异 */
+function themeIcon(theme: 'light' | 'dark'): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const add = (tag: string, attrs: Record<string, string>): void => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    svg.append(el);
+  };
+
+  if (theme === 'light') {
+    // 当前是浅色 → 点击会切到深色 → 显示月亮
+    add('path', { d: 'M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z' });
+  } else {
+    add('circle', { cx: '12', cy: '12', r: '4' });
+    add('path', { d: 'M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4' });
+  }
+  return svg;
+}
+
+// ---------------------------------------------------------------------------
+// 子 tab
+// ---------------------------------------------------------------------------
+
+/** 一个子 tab：一张图（或一张表） */
+interface SubTab {
+  label: string;
+  render(host: HTMLElement): void;
+}
+
+function subTabNode(label: string, id: string, active: boolean): HTMLButtonElement {
+  const btn = node('button', {
+    type: 'button',
+    class: `subtab${active ? ' on' : ''}`,
+    role: 'tab',
+    id: `subtab-${id}`,
+    'aria-selected': active ? 'true' : 'false',
+  });
+  btn.textContent = label;
+  return btn;
+}
+
+// ---------------------------------------------------------------------------
+// 初始档位下拉
+// ---------------------------------------------------------------------------
+
 const ROLL_CHOICES: readonly InitialRoll[] = ['random', 0, 1, 2, 3];
-
-function rollLabel(attr: SubAttr | '', roll: InitialRoll, weight: number): string {
-  if (roll === 'random') return '随机';
-  if (attr === '') return `第 ${roll + 1} 档`;
-  return tierLabel(attr, roll, weight > 0 ? weight : 1);
-}
 
 function rollValue(roll: InitialRoll): string {
   return roll === 'random' ? 'random' : String(roll);
 }
 
+function rollLabel(attr: SubAttr | '', roll: InitialRoll, weight: number): string {
+  if (roll === 'random') return C.ROLL_RANDOM;
+  // 选项必须带数值，否则用户没法判断选哪一档
+  if (attr === '') return C.rollFixed(roll);
+  return tierLabel(attr, roll, weight > 0 ? weight : 1);
+}
+
 /**
- * 重建档位选项。
- *
- * 选项文案要带数值（`2.7` 而不是「第 1 档」），否则用户没法判断该选哪一档；
- * 而数值取决于词条与权重，所以词条或权重一变就得重建。
+ * 重建档位选项。数值取决于词条与权重，所以词条或权重一变就得重建。
+ * 注意：`option.selected` 在 jsdom 下不足以让 `select.value` 跟上，末尾要显式赋值。
  */
 function fillRollOptions(
   sel: HTMLSelectElement,
@@ -145,7 +226,6 @@ function fillRollOptions(
   for (const roll of ROLL_CHOICES) {
     sel.append(option(rollValue(roll), rollLabel(attr, roll, weight), roll === selected));
   }
-  // 显式赋值一次：`option.selected` 在 jsdom 下不足以让 select.value 跟上
   sel.value = rollValue(selected);
 }
 
@@ -154,8 +234,6 @@ function fillRollOptions(
 // ---------------------------------------------------------------------------
 
 interface TabCtx {
-  shared(): SharedConfig;
-  growth(): GrowthConfig;
   patch(next: Partial<AppState>): void;
   tooltip: Tooltip;
 }
@@ -163,18 +241,14 @@ interface TabCtx {
 interface Tab {
   id: string;
   label: string;
-  /** 一句话说明这个 tab 回答什么问题 */
   blurb: string;
   /** 左栏：这个任务需要什么配置 */
   controls(host: HTMLElement, ctx: TabCtx): void;
   /** 右栏：结果区骨架，首次进入时调用一次 */
   mount(host: HTMLElement, ctx: TabCtx): void;
-  /**
-   * 配置栏的同步（不重建节点，避免夺走输入焦点）。
-   * 由 `controls` 在挂载时赋值。
-   */
+  /** 配置栏同步（不重建节点，避免夺走输入焦点） */
   syncControls?(): void;
-  /** 结果的刷新；不需要响应式就省略 */
+  /** 结果刷新 */
   update?(): void;
 }
 
@@ -184,40 +258,25 @@ export function mount(root: HTMLElement): void {
   let state = fromQuery(location.search);
   let activeTab = 'growth';
 
-  // ---- 骨架 ----
   root.replaceChildren();
   root.dataset.mounted = '1';
 
+  // ---- 标题栏 ----
   const hero = node('header', { class: 'hero' });
   const titleRow = node('div', { class: 'title-row' });
-  titleRow.append(node('h1', {}, '圣遗物词条概率分布'));
-  const themeBtn = node('button', { type: 'button', class: 'ghost small', id: 'themeBtn' });
+  titleRow.append(node('h1', {}, C.APP_TITLE));
+  const themeBtn = node('button', { type: 'button', class: 'icon-btn', id: 'themeBtn' });
   titleRow.append(themeBtn);
-  hero.append(titleRow);
-  hero.append(
-    node(
-      'p',
-      { class: 'lede' },
-      '给定主词条与各副词条的计分权重，算出「胚子练满后得分」的完整概率分布——' +
-        '不是给单件打分，而是回答「我有多大几率练出这样的」。',
-    ),
-  );
+  hero.append(titleRow, node('p', { class: 'lede' }, C.APP_LEDE));
   root.append(hero);
 
+  // ---- 两栏 ----
   const layout = node('div', { class: 'layout' });
-  /** 左栏：**当前 tab 的**配置 */
   const configHost = node('div', { class: 'config-col', id: 'config' });
   const results = node('main', { class: 'results' });
   const tabBar = node('div', { class: 'tabs', role: 'tablist' });
   const tabButtons = new Map<string, HTMLButtonElement>();
   const panelHost = node('div', { class: 'tab-panels', id: 'tabPanels' });
-
-  // 分享 / 重置是所有任务共用的动作，固定挂在左栏底部
-  const globalActions = node('div', { class: 'actions global' });
-  const shareBtn = node('button', { type: 'button', class: 'ghost', id: 'shareBtn' }, '复制链接');
-  const resetBtn = node('button', { type: 'button', class: 'ghost', id: 'resetBtn' }, '重置');
-  globalActions.append(shareBtn, resetBtn);
-
   results.append(tabBar, panelHost);
   layout.append(configHost, results);
 
@@ -225,20 +284,14 @@ export function mount(root: HTMLElement): void {
   root.append(layout, tooltipHost);
   const tooltip = new Tooltip(tooltipHost);
 
-  const ctx: TabCtx = {
-    shared: () => state,
-    growth: () => state,
-    patch: (next) => setState(next),
-    tooltip,
-  };
+  const ctx: TabCtx = { patch: (next) => setState(next), tooltip };
 
   // -------------------------------------------------------------------------
-  // 共享控件构造
+  // 共享控件
   // -------------------------------------------------------------------------
 
-  /** 主词条下拉 + 冲突清理 */
-  function mainAttrField(id: string): HTMLElement {
-    const sel = node('select', { id });
+  function mainAttrField(): HTMLElement {
+    const sel = node('select', { id: 'mainAttr' });
     for (const a of MAIN_ATTRS) sel.append(option(a, a, a === state.mainAttr));
     sel.value = state.mainAttr;
     sel.addEventListener('change', () => {
@@ -248,58 +301,47 @@ export function mount(root: HTMLElement): void {
       ) as AppState['slots'];
       setState({ mainAttr, slots });
     });
-    return field('主词条', sel);
+    return field(C.FIELD_MAIN, sel);
   }
 
   /**
-   * 副词条表：**词条 / 权重**（+ 可选 **初始档位**）。
+   * 副词条表：词条 / 权重（+ 可选 初始档位）。
    *
-   * 权重用一个 − / + 夹着的数字框：`<input type=number>` 自带的上下箭头又小又难按，
-   * 而这一列几乎只会小幅微调。数字框仍可直接输入任意值。
+   * 权重是 `−` / 数字框 / `+`：原生 number 的上下箭头太小，而这一列几乎只做小幅微调。
+   * `+` 从 0 直接跳到该词条的默认权重，`−` 从默认权重直接归零——见 `state.ts`。
    *
-   * `rollColumn = false` 用于「胚子质量」——那个任务只看掉落那一刻，
-   * 初始档位是**强化**才有的事，放在那里只会误导。
+   * `rollColumn = false` 用于「胚子质量」：初始档位是**强化**才有的事。
    */
-  function slotsField(idPrefix: string, rollColumn: boolean): { box: HTMLElement; refresh(): void } {
+  function slotsField(rollColumn: boolean): { box: HTMLElement; refresh(): void } {
     const box = node('div', { class: 'slots' });
-    box.append(node('h3', { class: 'sub' }, '副词条与权重'));
+    box.append(
+      node('h3', { class: 'sub' }, C.SECT_SUBSTATS),
+      node('p', { class: 'hint' }, rollColumn ? C.SUBSTATS_HINT_ROLL : C.SUBSTATS_HINT_NOROLL),
+    );
 
-    const hint = node('p', { class: 'hint' });
-    hint.append(document.createTextNode('只统计权重大于 0 的词条，默认口径暴击 1、暴伤 1。'));
-    if (rollColumn) {
-      hint.append(
-        node('br'),
-        document.createTextNode(
-          '「初始档位」= 掉落时那一次成长取第几档，固定它可以算「初始最小 / 最大」的极端情况。',
-        ),
-      );
-    }
-    box.append(hint);
-
-    const head = node('div', { class: `slot-head${rollColumn ? '' : ' two-col'}` });
-    head.append(node('span', {}, '词条'), node('span', {}, '权重'));
-    if (rollColumn) head.append(node('span', {}, '初始档位'));
+    const head = node('div', { class: 'slot-head' });
+    head.append(node('span', {}, C.COL_ATTR), node('span', {}, C.COL_WEIGHT));
+    if (rollColumn) head.append(node('span', {}, C.COL_ROLL));
     box.append(head);
 
-    const rows = node('div', { class: `slot-rows${rollColumn ? '' : ' two-col'}`, id: `${idPrefix}slotRows` });
+    const rows = node('div', { class: 'slot-rows', id: 'slotRows' });
     box.append(rows);
+    const warn = node('p', { class: 'hint warn', id: 'ignoredNote' });
+    box.append(warn);
 
-    const warnNote = node('p', { class: 'hint warn', id: `${idPrefix}ignoredNote` });
-    box.append(warnNote);
-
-    // 一个委托处理三种交互：
-    //   change → 两个下拉（词条 / 初始档位）
+    // 一个委托接三种交互：
+    //   change → 词条 / 初始档位两个下拉
     //   input  → 权重数字框（边打字边出结果）
-    //   click  → 权重的 − / + 按钮（按钮不产生 change/input，必须单独接）
-    rows.addEventListener('change', onSlotEdit);
+    //   click  → 权重 − / +（按钮不产生 change/input，必须单独接）
+    rows.addEventListener('change', onEdit);
     rows.addEventListener('input', (ev) => {
-      if ((ev.target as HTMLElement).dataset['key'] === 'weight') onSlotEdit(ev);
+      if ((ev.target as HTMLElement).dataset['key'] === 'weight') onEdit(ev);
     });
     rows.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).dataset['key'] === 'step') onSlotEdit(ev);
+      if ((ev.target as HTMLElement).dataset['key'] === 'step') onEdit(ev);
     });
 
-    function onSlotEdit(ev: Event): void {
+    function onEdit(ev: Event): void {
       const t = ev.target as HTMLSelectElement | HTMLInputElement | HTMLButtonElement;
       const idxRaw = t.dataset['slot'];
       if (idxRaw === undefined) return;
@@ -312,29 +354,33 @@ export function mount(root: HTMLElement): void {
           const attr = (t as HTMLSelectElement).value as SubAttr | '';
           const previous = cur.attr;
           cur.attr = attr;
-          if (attr === '') cur.weight = 0;
-          else if (!(cur.weight > 0)) cur.weight = 1;
+          // 选中一个词条就给它权重初值（暴击 → 2，其余 → 1），取消则清零
+          cur.weight = weightOnSelect(attr);
 
           // 同一个词条只能占一个槽位：改成一个已被占用的词条时，两条互换
-          const dupIdx = slots.findIndex((s, i) => i !== idx && s.attr === attr);
-          if (attr !== '' && dupIdx >= 0) {
-            const other = slots[dupIdx]!;
+          const dup = slots.findIndex((s, i) => i !== idx && s.attr === attr);
+          if (attr !== '' && dup >= 0) {
+            const other = slots[dup]!;
             other.attr = previous;
-            if (previous === '') other.weight = 0;
+            other.weight = weightOnSelect(previous);
           }
           break;
         }
         case 'weight': {
           const raw = (t as HTMLInputElement).value.trim();
-          // 允许中间态（空串 / 只有负号）：交给 toSpec 去忽略，不要在这里抛错
+          // 允许中间态（空串 / 只有负号）：交给 toSpec 忽略，不要在这里抛错
           cur.weight = raw === '' ? 0 : Number(raw);
           break;
         }
         case 'step': {
           const delta = Number(t.dataset['delta']);
-          const next = cur.weight + delta;
-          // 只在 0 处夹住；两位小数就够，避免 0.1 反复加减攒出 0.30000000000000004
-          cur.weight = Math.max(0, Math.round(next * 100) / 100);
+          // 读**输入框当前值**，不是 state 里的值：用户可能刚手动改过数字框，
+          // 而那一步还没进 state。以输入框为准，「按了没反应」这类错位就不可能发生。
+          const cur_input = t.parentElement?.querySelector<HTMLInputElement>('input[data-key="weight"]');
+          const from = Number(cur_input?.value ?? cur.weight);
+          const base = Number.isFinite(from) ? from : cur.weight;
+          cur.weight =
+            delta > 0 ? nextWeightUp(cur.attr, base) : nextWeightDown(cur.attr, base);
           break;
         }
         case 'roll': {
@@ -352,42 +398,51 @@ export function mount(root: HTMLElement): void {
       const allowed = selectableAttrs(state.mainAttr);
       rows.replaceChildren();
       state.slots.forEach((slot, i) => {
-        const row = node('div', { class: 'slot-row' });
+        const r = node('div', { class: 'slot-row' });
+        if (!rollColumn) r.classList.add('two-col');
 
         const sel = node('select', { 'data-slot': String(i), 'data-key': 'attr' });
         sel.append(option('', '（不计分）', slot.attr === ''));
         for (const a of allowed) sel.append(option(a, a, a === slot.attr));
-        // 词条可能已不可选（主词条被改成同名词条），此时退回「不计分」，
-        // 与 `toSpec` 对冲突词条的处理一致
+        // 词条可能已不可选（主词条被改成同名词条），退回「不计分」，
+        // 与 toSpec 对冲突词条的处理一致
         sel.value = allowed.includes(slot.attr as SubAttr) ? slot.attr : '';
 
         const stepper = node('div', { class: 'stepper' });
-        const minus = node('button', {
-          type: 'button',
-          class: 'step',
-          'data-slot': String(i),
-          'data-key': 'step',
-          'data-delta': String(-WEIGHT_STEP),
-          'aria-label': '减小权重',
-        }, '−');
+        const minus = node(
+          'button',
+          {
+            type: 'button',
+            class: 'step',
+            'data-slot': String(i),
+            'data-key': 'step',
+            'data-delta': '-1',
+            'aria-label': C.ARIA_WEIGHT_DOWN,
+          },
+          '−',
+        );
         const input = node('input', {
           type: 'number',
           min: '0',
-          step: String(WEIGHT_STEP),
+          step: '0.1',
           inputmode: 'decimal',
           'data-slot': String(i),
           'data-key': 'weight',
-          'aria-label': `${slot.attr || `第 ${i + 1} 条`}的权重`,
+          'aria-label': C.ariaWeightOf(slot.attr, i),
         });
         input.value = String(slot.weight);
-        const plus = node('button', {
-          type: 'button',
-          class: 'step',
-          'data-slot': String(i),
-          'data-key': 'step',
-          'data-delta': String(WEIGHT_STEP),
-          'aria-label': '增大权重',
-        }, '+');
+        const plus = node(
+          'button',
+          {
+            type: 'button',
+            class: 'step',
+            'data-slot': String(i),
+            'data-key': 'step',
+            'data-delta': '1',
+            'aria-label': C.ARIA_WEIGHT_UP,
+          },
+          '+',
+        );
         stepper.append(minus, input, plus);
 
         const roll = rollColumn
@@ -395,27 +450,31 @@ export function mount(root: HTMLElement): void {
           : null;
         if (roll) fillRollOptions(roll, slot.attr, slot.weight, slot.initialRoll);
 
-        row.append(sel, stepper);
-        if (roll) row.append(roll);
-        rows.append(row);
-
-        syncRow(row, slot);
+        r.append(sel, stepper);
+        if (roll) r.append(roll);
+        rows.append(r);
+        syncRow(r, slot);
       });
     }
 
     /** 减号在 0 处禁用；档位下拉的标签跟着词条与权重走 */
-    function syncRow(row: HTMLElement, slot: SlotInput): void {
-      const minus = row.querySelector<HTMLButtonElement>('.step[data-delta^="-"]');
+    function syncRow(r: HTMLElement, slot: SlotInput): void {
+      const minus = r.querySelector<HTMLButtonElement>('.step[data-delta="-1"]');
       if (minus) minus.disabled = !(slot.weight > 0);
-      const roll = row.querySelector<HTMLSelectElement>('select[data-key="roll"]');
+      const roll = r.querySelector<HTMLSelectElement>('select[data-key="roll"]');
       if (roll) fillRollOptions(roll, slot.attr, slot.weight, slot.initialRoll);
     }
 
-    return { box, refresh: render };
+    return {
+      box,
+      refresh() {
+        render();
+        warn.textContent = C.ignoredNote(toSpec(state).ignored);
+      },
+    };
   }
 
-  /** 初始词条数（只属于「得分分布」） */
-  function initialVisibleField(): HTMLElement {
+  function initialField(): HTMLElement {
     const sel = node('select', { id: 'initialVisible' });
     sel.append(option('4', '4 词条', state.initialVisible === 4));
     sel.append(option('3', '3 词条', state.initialVisible === 3));
@@ -423,10 +482,9 @@ export function mount(root: HTMLElement): void {
     sel.addEventListener('change', () => {
       setState({ initialVisible: Number(sel.value) === 3 ? 3 : 4 });
     });
-    return field('掉落时可见的词条数', sel);
+    return field(C.FIELD_INITIAL, sel);
   }
 
-  /** 目标分数（只属于「得分分布」） */
   function targetField(): HTMLElement {
     const input = node('input', { id: 'targetScore', type: 'number', step: '0.5', min: '0' });
     input.value = String(state.targetScore);
@@ -434,8 +492,27 @@ export function mount(root: HTMLElement): void {
       const v = Number(input.value);
       if (Number.isFinite(v) && v >= 0) setState({ targetScore: v });
     });
-    return field('目标分数', input);
+    return field(C.FIELD_TARGET, input);
   }
+
+  /** 面板标题行：左标题、右操作（目前只有「重置」） */
+  function panelHead(title: string, actions: HTMLElement[]): HTMLElement {
+    const head = node('div', { class: 'panel-head' });
+    head.append(node('h2', {}, title));
+    if (actions.length > 0) {
+      const box = node('div', { class: 'panel-actions' });
+      box.append(...actions);
+      head.append(box);
+    }
+    return head;
+  }
+
+  const resetBtn = node(
+    'button',
+    { type: 'button', class: 'ghost small', id: 'resetBtn', title: C.RESET_TITLE },
+    C.RESET,
+  );
+  resetBtn.addEventListener('click', () => setState({ ...defaultShared(), ...defaultGrowth() }));
 
   // -------------------------------------------------------------------------
   // Tab 1：得分分布
@@ -443,352 +520,304 @@ export function mount(root: HTMLElement): void {
 
   const growthTab: Tab = {
     id: 'growth',
-    label: '得分分布',
-    blurb: '胚子练满 +20 之后的得分分布（含 5 次成长）',
+    label: C.TAB_GROWTH,
+    blurb: C.GROWTH_BLURB,
 
     controls(host) {
-      const panel = node('form', { class: 'panel sticky', id: 'form' });
-      panel.addEventListener('submit', (ev) => ev.preventDefault());
-      panel.append(node('h2', {}, '配置'));
-      panel.append(mainAttrField('mainAttr'));
-      panel.append(initialVisibleField());
+      const form = node('form', { class: 'panel sticky', id: 'form' });
+      form.addEventListener('submit', (ev) => ev.preventDefault());
+      form.append(panelHead(C.CONFIG, [resetBtn]));
 
-      const slots = slotsField('', true);
-      panel.append(slots.box);
-      panel.append(targetField());
-      panel.append(globalActions);
+      // 主词条与初始词条数并排一行
+      const pair = node('div', { class: 'field-pair' });
+      pair.append(mainAttrField(), initialField());
+      form.append(pair);
 
-      host.append(panel);
-      this.syncControls = () => {
-        slots.refresh();
-        const note = panel.querySelector<HTMLElement>('#ignoredNote');
-        const { ignored } = toSpec(state);
-        if (note) {
-          note.textContent = ignored.length > 0 ? `已忽略权重非法的词条：${ignored.join('、')}` : '';
-        }
-      };
+      const slots = slotsField(true);
+      form.append(slots.box, targetField());
+      host.append(form);
+      this.syncControls = () => slots.refresh();
     },
 
     mount(host, tabCtx) {
-      const tooltip = tabCtx.tooltip;
       const cards = node('section', { class: 'cards', id: 'cards' });
-      const summary = node('p', { class: 'summary', id: 'summary' });
-      host.append(cards, summary);
+      host.append(cards);
 
-      const scorePanel = node('section', { class: 'panel' });
-      scorePanel.append(node('h2', {}, '每个分数的概率构成'));
-      scorePanel.append(
-        node(
-          'p',
-          { class: 'hint' },
-          '每根柱子是一个可能的最终分数，柱子越高说明越容易练到这个分数；' +
-            '颜色表示这部分的概率来自「有效词条多命中了几次」。把鼠标移到柱子上看明细。',
-        ),
-      );
-      const scoreChart = node('div', { class: 'chart-wrap', id: 'scoreChart' });
-      scorePanel.append(scoreChart);
-      host.append(scorePanel);
-
-      const survPanel = node('section', { class: 'panel' });
-      survPanel.append(node('h2', {}, '「至少 X 分」的概率'));
-      survPanel.append(
-        node(
-          'p',
-          { class: 'hint' },
-          '生存曲线：横轴是分数线，纵轴是「得分不低于该线」的概率，' +
-            '所以从左上角一路递减到右下角。纵轴是独立的 0~100%，不与上图共用比例。',
-        ),
-      );
-      const survChart = node('div', { class: 'chart-wrap', id: 'survChart' });
-      survPanel.append(survChart);
-      host.append(survPanel);
-
-      const hitPanel = node('section', { class: 'panel' });
-      hitPanel.append(node('h2', {}, '命中次数分布'));
-      hitPanel.append(
-        node(
-          'p',
-          { class: 'hint' },
-          '「命中 h 次」= 计分词条一共吃到的成长次数 − 计分词条数（掉落时的初始档位不算成长）。',
-        ),
-      );
-      const hitChart = node('div', { class: 'chart-wrap', id: 'hitChart' });
-      const hit = dataTable(['命中有效词条', '概率', '大致多少次出一个'], 'hitTable');
-      hitPanel.append(hitChart, hit.table);
-      host.append(hitPanel);
-
-      const qPanel = node('section', { class: 'panel' });
-      qPanel.append(node('h2', {}, '分位分数线'));
-      qPanel.append(
-        node('p', { class: 'hint' }, '「只有 α 的概率能达到该分数及以上」——想要更稳就得接受更高的分数线。'),
-      );
-      const quantile = dataTable(['目标概率 α', '需要的分数线', '大致要刷'], 'quantileTable');
-      qPanel.append(quantile.table);
-      host.append(qPanel);
+      const panels = node('div', { class: 'subtab-panels' });
+      const bar = node('div', { class: 'subtabs', role: 'tablist' });
 
       let table: DistributionTable | null = null;
-      let data: StackedDatum[] = [];
+      let shares: StackedDatum[] = [];
       let hitLabels: string[] = [];
 
+      const subs: SubTab[] = [
+        {
+          label: C.SUB_DIST,
+          render(box) {
+            const p = panel(
+              C.scoreChartTitle(state.mainAttr, state.initialVisible),
+              C.SCORE_CHART_HINT,
+            );
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'scoreChart' });
+            p.body.append(chart);
+            box.append(p.box);
+            if (!table) return;
+            chart.append(
+              renderScoreBars({
+                data: shares,
+                hitLabels,
+                marker: {
+                  score: state.targetScore,
+                  label: C.markerScore(fmtScore(state.targetScore)),
+                },
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
+        {
+          label: C.SUB_SURVIVAL,
+          render(box) {
+            const p = panel(C.SURVIVAL_TITLE, C.SURVIVAL_HINT);
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'survChart' });
+            p.body.append(chart);
+            box.append(p.box);
+            if (!table) return;
+            const at = probAtLeast(table, state.targetScore);
+            chart.append(
+              renderSurvival({
+                scores: table.scores,
+                survival: survival(table),
+                ...(at > 0
+                  ? { marker: { score: state.targetScore, label: C.markerProb(pct(at)) } }
+                  : {}),
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
+        {
+          label: C.SUB_HITS,
+          render(box) {
+            const p = panel('');
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'hitChart' });
+            const t = dataTable([C.TH_HITS, C.TH_PROB, C.TH_ATTEMPTS], 'hitTable');
+            p.body.append(chart, t.table);
+            box.append(p.box);
+            if (!table) return;
+            const hitProbs = hitProbabilities(table);
+            chart.append(
+              renderHistogram({
+                items: hitProbs.map((h) => ({
+                  label: C.hitBucketLabel(h.hits),
+                  value: h.p,
+                  color: hitColor(h.hits),
+                })),
+                title: C.HIT_CHART_TITLE,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+            t.body.replaceChildren(
+              ...hitProbs.map((h) =>
+                row([C.hitBucketLabel(h.hits), pct(h.p), oneIn(1 / h.p)]),
+              ),
+            );
+          },
+        },
+        {
+          label: C.SUB_QUANTILE,
+          render(box) {
+            const p = panel('', C.QUANTILE_HINT);
+            p.box.classList.add('flush');
+            const t = dataTable([C.TH_ALPHA, C.TH_LINE, C.TH_ATTEMPTS], 'quantileTable');
+            p.body.append(t.table);
+            box.append(p.box);
+            if (!table) return;
+            t.body.replaceChildren(
+              ...[0.5, 0.1, 0.01].map((alpha) => {
+                const q = scoreAtAlpha(table!, alpha);
+                if (q === undefined) {
+                  return row([C.topPercent(alpha), '—', C.QUANTILE_OUT_OF_RANGE]);
+                }
+                return row([
+                  C.topPercent(alpha),
+                  `${fmtScore(q)} 分`,
+                  oneIn(1 / probAtLeast(table!, q)),
+                ]);
+              }),
+            );
+          },
+        },
+      ];
+
+      const sub = mountSubTabs(bar, panels, subs);
+      host.append(bar, panels);
+
       this.update = () => {
-        const { spec, ignored, scoredCount } = toSpec(state);
-        let next: DistributionTable;
+        const { spec, scoredCount } = toSpec(state);
         try {
-          next = scoreDistribution(spec);
+          table = scoreDistribution(spec);
         } catch (err) {
-          summary.textContent = '';
-          cards.replaceChildren(node('p', { class: 'error' }, `计算失败：${(err as Error).message}`));
-          scoreChart.replaceChildren();
-          survChart.replaceChildren();
-          hitChart.replaceChildren();
-          hit.body.replaceChildren();
-          quantile.body.replaceChildren();
+          table = null;
+          cards.replaceChildren(
+            node('p', { class: 'error' }, `${C.CALC_FAILED}${(err as Error).message}`),
+          );
+          sub.refresh();
           return;
         }
-        table = next;
 
         const byHit = pmfByHit(table);
-        data = table.scores.map((s, i) => ({
+        shares = table.scores.map((s, i) => ({
           score: s,
-          byHit: byHit.map((row) => row[i] ?? 0),
+          byHit: byHit.map((r) => r[i] ?? 0),
         }));
         hitLabels = Array.from({ length: table.hitBuckets }, (_, h) => `命中 ${h} 次`);
 
         const p = probAtLeast(table, state.targetScore);
         const attempts = expectedAttempts(table, state.targetScore);
-        const hitProbs = hitProbabilities(table);
         const best = table.scores[table.scores.length - 1] ?? 0;
-        const fixedRolls = state.slots.filter((s) => s.weight > 0 && s.initialRoll !== 'random').length;
-
-        summary.textContent =
-          `当前配置：${scoredCount} 个计分词条 · ${state.initialVisible} 词条胚子 · ` +
-          `目标 ${fmtScore(state.targetScore)} 分` +
-          (fixedRolls > 0 ? ` · ${fixedRolls} 条固定初始档位` : '') +
-          '。' +
-          (ignored.length > 0 ? `（权重非法、已忽略：${ignored.join('、')}）` : '');
 
         cards.replaceChildren(
-          card('目标分数', `${fmtScore(state.targetScore)} 分`, '在左栏修改'),
-          card('达到概率', pct(p), `得分 ≥ ${fmtScore(state.targetScore)}`),
-          card('大致要刷', attempts ? oneIn(attempts) : '不可能', '按 1/p 估算，单位「个胚子」'),
-          card('最高可能分', fmtScore(best), `计分槽位 ${scoredCount}/4`),
+          card(C.CARD_TARGET, `${fmtScore(state.targetScore)} 分`, C.CARD_TARGET_NOTE),
+          card(C.CARD_REACH, pct(p), C.reachNote(fmtScore(state.targetScore))),
+          card(C.CARD_ATTEMPTS, attempts ? oneIn(attempts) : '—', C.CARD_ATTEMPTS_NOTE),
+          card(C.CARD_BEST, fmtScore(best), C.scoredSlotsNote(scoredCount)),
         );
-
-        scoreChart.replaceChildren(
-          renderScoreBars({
-            data,
-            hitLabels,
-            title: `${state.mainAttr}主词条 · ${state.initialVisible} 词条胚子`,
-            marker: { score: state.targetScore, label: `目标 ${fmtScore(state.targetScore)}` },
-            tooltip,
-          }),
-        );
-
-        survChart.replaceChildren(
-          renderSurvival({
-            scores: table.scores,
-            survival: survival(table),
-            title: 'P(得分 ≥ 分数线)',
-            // `exactOptionalPropertyTypes` 下不能用 `marker: undefined`，只能用展开
-            ...(p > 0
-              ? {
-                  marker: {
-                    score: state.targetScore,
-                    label: `目标 ${fmtScore(state.targetScore)} 分 · ${pct(p)}`,
-                  },
-                }
-              : {}),
-            tooltip,
-          }),
-        );
-
-        hitChart.replaceChildren(
-          renderHistogram({
-            items: hitProbs.map((h) => ({
-              label: `命中 ${h.hits} 次`,
-              value: h.p,
-              color: hitColor(h.hits),
-              note: `平均 ${oneIn(1 / h.p)}`,
-            })),
-            title: '各命中档的出现概率',
-            tooltip,
-          }),
-        );
-
-        hit.body.replaceChildren(
-          ...hitProbs.map((h) => {
-            const tr = node('tr');
-            tr.append(node('td', {}, `命中 ${h.hits} 次`));
-            tr.append(node('td', {}, pct(h.p)));
-            tr.append(node('td', {}, oneIn(1 / h.p)));
-            return tr;
-          }),
-        );
-
-        quantile.body.replaceChildren(
-          ...[0.5, 0.1, 0.01].map((alpha) => {
-            const q = scoreAtAlpha(table!, alpha);
-            const tr = node('tr');
-            tr.append(node('td', {}, `前 ${alpha * 100}%`));
-            if (q === undefined) {
-              tr.append(node('td', {}, '—'), node('td', {}, '超出可能范围'));
-            } else {
-              tr.append(node('td', {}, `${fmtScore(q)} 分`));
-              tr.append(node('td', {}, oneIn(1 / probAtLeast(table!, q))));
-            }
-            return tr;
-          }),
-        );
+        sub.refresh();
       };
     },
   };
 
   // -------------------------------------------------------------------------
-  // Tab 2：胚子质量（未强化）
+  // Tab 2：胚子质量
   // -------------------------------------------------------------------------
 
   const qualityTab: Tab = {
     id: 'quality',
-    label: '胚子质量',
-    blurb: '刚掉落、一次没强化的胚子本身有多好（不含成长）',
+    label: C.TAB_QUALITY,
+    blurb: C.QUALITY_BLURB,
 
     controls(host) {
-      const panel = node('form', { class: 'panel sticky', id: 'form' });
-      panel.addEventListener('submit', (ev) => ev.preventDefault());
-      panel.append(node('h2', {}, '配置'));
-      panel.append(
-        node('p', { class: 'hint' }, '这个任务只看掉落那一刻，所以不需要「初始词条数」和「目标分数」。'),
-      );
-      panel.append(mainAttrField('mainAttr'));
+      const form = node('form', { class: 'panel sticky', id: 'form' });
+      form.addEventListener('submit', (ev) => ev.preventDefault());
+      form.append(panelHead(C.CONFIG, [resetBtn]));
+      form.append(mainAttrField());
 
-      const slots = slotsField('', false);
-      panel.append(slots.box);
-      panel.append(globalActions);
-
-      host.append(panel);
-      this.syncControls = () => {
-        slots.refresh();
-        const note = panel.querySelector<HTMLElement>('#ignoredNote');
-        const { ignored } = toSpec(state);
-        if (note) {
-          note.textContent = ignored.length > 0 ? `已忽略权重非法的词条：${ignored.join('、')}` : '';
-        }
-      };
+      const slots = slotsField(false);
+      form.append(slots.box);
+      host.append(form);
+      this.syncControls = () => slots.refresh();
     },
 
     mount(host, tabCtx) {
-      const tooltip = tabCtx.tooltip;
       const cards = node('section', { class: 'cards' });
-      const note = node('p', { class: 'hint' });
+      const note = node('p', { class: 'summary' });
       host.append(cards, note);
 
-      const qPanel = node('section', { class: 'panel' });
-      qPanel.append(node('h2', {}, '掉落时的得分分布'));
-      const qHint = node('p', { class: 'hint' });
-      qHint.append(
-        document.createTextNode('这里只统计'),
-        node('b', {}, '掉落那一刻'),
-        document.createTextNode(
-          '的 4 个副词条，得分 = 有效词条的权重之和，没有强化成长。' +
-            '和「得分分布」页的差别，就是「运气」与「运气 + 强化」的差别。',
-        ),
-      );
-      qPanel.append(qHint);
-      const qChart = node('div', { class: 'chart-wrap' });
-      qPanel.append(qChart);
-      host.append(qPanel);
+      const panels = node('div', { class: 'subtab-panels' });
+      const bar = node('div', { class: 'subtabs', role: 'tablist' });
+      let dist: QualityDistribution | null = null;
 
-      const pPanel = node('section', { class: 'panel' });
-      pPanel.append(node('h2', {}, '组合概率'));
-      pPanel.append(
-        node('p', { class: 'hint' }, '掉落的 4 个副词条落在各有效词条组合上的概率；概率过小的长尾合并为「其他」。'),
-      );
-      const pieWrap = node('div', { class: 'pie-wrap' });
-      const pieSvg = node('div', { class: 'pie-box' });
-      const pieLegend = node('div', { class: 'pie-legend-html' });
-      pieWrap.append(pieSvg, pieLegend);
-      pPanel.append(pieWrap);
-      host.append(pPanel);
+      const subs: SubTab[] = [
+        {
+          label: C.SUB_QUALITY_DIST,
+          render(box) {
+            const p = panel('', C.QUALITY_DIST_HINT);
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap' });
+            p.body.append(chart);
+            box.append(p.box);
+            if (!dist) return;
+            const buckets = dist.buckets.filter((b) => b.score > 0);
+            chart.append(
+              renderHistogram({
+                items: (buckets.length > 0 ? buckets : dist.buckets).map((b) => ({
+                  label: fmtScore(b.score),
+                  value: b.p,
+                  note: b.combos.length > 1 ? C.sameScoreCombos(b.combos.length) : undefined,
+                })),
+                title: C.AXIS_SCORE,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
+        {
+          label: C.SUB_COMBOS,
+          render(box) {
+            const p = panel('', C.COMBOS_HINT);
+            const wrap = node('div', { class: 'pie-wrap' });
+            const pieBox = node('div', { class: 'pie-box' });
+            const legend = node('div', { class: 'pie-legend-html' });
+            wrap.append(pieBox, legend);
+            p.body.append(wrap);
+            box.append(p.box);
+            if (!dist) return;
 
-      const aPanel = node('section', { class: 'panel' });
-      aPanel.append(node('h2', {}, '每条有效词条出现的概率'));
-      aPanel.append(
-        node('p', { class: 'hint' }, '「这件胚子里含有该词条」的概率。因为词条不能重复，它并不等于权重占比。'),
-      );
-      const attrTable = dataTable(['词条', '出现概率', '权重', '平均多少个胚子带它']);
-      aPanel.append(attrTable.table);
-      host.append(aPanel);
+            const slices = pieSlices(dist.combos, { maxSlices: 8, minShare: 0.005 });
+            pieBox.append(renderPie({ items: slices, title: C.SUB_COMBOS, tooltip: tabCtx.tooltip }));
+            legend.replaceChildren(
+              ...slices.map((s, i) => {
+                const r = node('div', { class: 'legend-row' });
+                const dot = node('span', { class: 'legend-dot' });
+                dot.style.background = hitColor(i);
+                r.append(dot, node('span', { class: 'legend-name' }, s.label));
+                r.append(node('span', { class: 'legend-val' }, pct(s.p)));
+                return r;
+              }),
+            );
+          },
+        },
+        {
+          label: C.SUB_ATTRS,
+          render(box) {
+            const p = panel('', C.ATTRS_HINT);
+            const t = dataTable([C.TH_ATTR, C.TH_ATTR_PROB, C.TH_WEIGHT, C.TH_ATTR_ATTEMPTS]);
+            p.body.append(t.table);
+            box.append(p.box);
+            if (!dist) return;
+            const weights = weightMap(state);
+            t.body.replaceChildren(
+              ...dist.attrProbs
+                .slice()
+                .sort((a, b) => b.p - a.p)
+                .map((a) =>
+                  row([a.attr, pct(a.p), String(weights[a.attr] ?? 0), a.p > 0 ? oneIn(1 / a.p) : '—']),
+                ),
+            );
+          },
+        },
+      ];
+
+      const sub = mountSubTabs(bar, panels, subs);
+      host.append(bar, panels);
 
       this.update = () => {
-        let d: QualityDistribution;
         try {
-          d = qualityDistribution({ mainAttr: state.mainAttr, weights: weightMap(state) });
+          dist = qualityDistribution({ mainAttr: state.mainAttr, weights: weightMap(state) });
         } catch (err) {
-          note.textContent = `计算失败：${(err as Error).message}`;
+          dist = null;
+          note.textContent = `${C.CALC_FAILED}${(err as Error).message}`;
           cards.replaceChildren();
-          qChart.replaceChildren();
-          pieSvg.replaceChildren();
-          pieLegend.replaceChildren();
-          attrTable.body.replaceChildren();
+          sub.refresh();
           return;
         }
 
-        note.textContent =
-          `主词条 ${state.mainAttr}` +
-          (d.droppedAttr ? ` · 「${d.droppedAttr}」不会再出现在副词条里` : '') +
-          (d.attrs.length === 0 ? ' · 还没有填写任何计分词条' : '');
-
+        note.textContent = C.qualityNote(state.mainAttr, dist.droppedAttr, dist.attrs.length);
         cards.replaceChildren(
-          card('有效词条', `${d.attrs.length} 条`, d.attrs.join(' / ') || '—'),
-          card('期望得分', fmtScore(d.mean), '掉落时，不是练满后'),
-          card('最高可能分', fmtScore(d.best), '有效词条全部命中'),
+          card(C.CARD_ATTRS, `${dist.attrs.length} 条`, dist.attrs.join(' / ') || '—'),
+          card(C.CARD_MEAN, fmtScore(dist.mean), C.CARD_MEAN_NOTE),
+          card(C.CARD_BEST_DROP, fmtScore(dist.best), C.CARD_BEST_DROP_NOTE),
           card(
-            '最常见的组合',
-            d.mode ? pct(d.mode.p) : '—',
-            d.mode ? comboLabel(d.mode.combo) : '—',
+            C.CARD_MODE,
+            dist.mode ? pct(dist.mode.p) : '—',
+            dist.mode ? comboLabel(dist.mode.combo) : '—',
           ),
         );
-
-        const buckets = d.buckets.filter((b) => b.score > 0);
-        qChart.replaceChildren(
-          renderHistogram({
-            items: (buckets.length > 0 ? buckets : d.buckets).map((b) => ({
-              label: fmtScore(b.score),
-              value: b.p,
-              note: b.combos.length > 1 ? `${b.combos.length} 种组合同分` : undefined,
-            })),
-            title: '掉落时得分',
-            tooltip,
-          }),
-        );
-
-        const slices = pieSlices(d.combos, { maxSlices: 8, minShare: 0.005 });
-        pieSvg.replaceChildren(renderPie({ items: slices, title: '组合概率', tooltip }));
-        pieLegend.replaceChildren(
-          ...slices.map((s, i) => {
-            const row = node('div', { class: 'legend-row' });
-            const dot = node('span', { class: 'legend-dot' });
-            dot.style.background = hitColor(i);
-            row.append(dot, node('span', { class: 'legend-name' }, s.label));
-            row.append(node('span', { class: 'legend-val' }, pct(s.p)));
-            return row;
-          }),
-        );
-
-        const weights = weightMap(state);
-        attrTable.body.replaceChildren(
-          ...d.attrProbs
-            .slice()
-            .sort((a, b) => b.p - a.p)
-            .map((a) => {
-              const tr = node('tr');
-              tr.append(node('td', {}, a.attr));
-              tr.append(node('td', {}, pct(a.p)));
-              tr.append(node('td', {}, String(weights[a.attr] ?? 0)));
-              tr.append(node('td', {}, a.p > 0 ? oneIn(1 / a.p) : '—'));
-              return tr;
-            }),
-        );
+        sub.refresh();
       };
     },
   };
@@ -799,30 +828,77 @@ export function mount(root: HTMLElement): void {
 
   const moreTab: Tab = {
     id: 'more',
-    label: '更多',
+    label: C.TAB_MORE,
     blurb: '',
     controls(host) {
-      const panel = node('div', { class: 'panel sticky' });
-      panel.append(node('h2', {}, '配置'));
-      panel.append(node('p', { class: 'hint' }, '这个 tab 还没有内容。'));
-      panel.append(globalActions);
-      host.append(panel);
+      const box = node('div', { class: 'panel sticky' });
+      box.append(panelHead(C.CONFIG, [resetBtn]), node('p', { class: 'hint' }, '此页暂无内容。'));
+      host.append(box);
     },
     mount(host) {
-      const panel = node('section', { class: 'panel' });
-      panel.append(node('h2', {}, '还没做的'));
+      const p = panel(C.MORE_TITLE);
       const list = node('ul', { class: 'todo' });
-      for (const t of [
-        '胚子质量里的「主词条 → 副词条」热力图（归档 plot_substat_heatmap，数据已备好）',
-        '3 词条 / 4 词条混合掉落（按副本、合成台分别设比例）',
-        '图表导出 PNG / SVG',
-      ]) {
-        list.append(node('li', {}, t));
-      }
-      panel.append(list);
-      host.append(panel);
+      for (const item of C.MORE_ITEMS) list.append(node('li', {}, item));
+      p.body.append(list);
+      host.append(p.box);
     },
   };
+
+  /**
+   * 装配子 tab：`bar` 放按钮，`panels` 放内容。
+   *
+   * **只渲染当前可见的那个**：四个子 tab 里有三张图，全部渲染等于白算三遍
+   * （得分分布一次 5~20 ms，大表更久）。切回来时重渲染一次即可。
+   */
+  function mountSubTabs(
+    bar: HTMLElement,
+    panels: HTMLElement,
+    subs: SubTab[],
+  ): { refresh(): void; select(i: number): void } {
+    const buttons: HTMLButtonElement[] = [];
+    const holders: HTMLElement[] = [];
+    let active = 0;
+
+    subs.forEach((s, i) => {
+      const btn = subTabNode(s.label, `${bar.id || 'sub'}-${i}`, i === 0);
+      btn.addEventListener('click', () => select(i));
+      bar.append(btn);
+      buttons.push(btn);
+
+      const holder = node('div', {
+        class: 'subtab-panel',
+        role: 'tabpanel',
+        'data-sub': String(i),
+      });
+      holder.hidden = i !== 0;
+      panels.append(holder);
+      holders.push(holder);
+    });
+
+    function select(i: number): void {
+      if (i < 0 || i >= subs.length) return;
+      active = i;
+      buttons.forEach((b, k) => {
+        b.classList.toggle('on', k === i);
+        b.setAttribute('aria-selected', k === i ? 'true' : 'false');
+      });
+      holders.forEach((h, k) => {
+        h.hidden = k !== i;
+      });
+      // 新露出来的那张图还是空的（或上一次的内容），必须重渲染
+      render();
+    }
+
+    function render(): void {
+      const holder = holders[active];
+      const sub = subs[active];
+      if (!holder || !sub) return;
+      holder.replaceChildren();
+      sub.render(holder);
+    }
+
+    return { refresh: render, select };
+  }
 
   // -------------------------------------------------------------------------
   // tab 装配
@@ -845,11 +921,6 @@ export function mount(root: HTMLElement): void {
     tabBar.append(btn);
   }
 
-  /**
-   * 只刷新「当前可见」的 tab：把隐藏的图也一起重算纯属浪费
-   * （得分分布一次计算 5~20ms，每敲一个字符都算三遍没有意义）。
-   * 但**非当前 tab 必须被标记为过期**，否则切回去看到的是旧输入的图。
-   */
   const mountedTabs = new Set<string>();
   const staleTabs = new Set<string>();
 
@@ -863,27 +934,26 @@ export function mount(root: HTMLElement): void {
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     }
 
-    // 配置栏整体换掉：**每个任务的配置本来就不一样**
+    // 配置栏整体换掉：每个任务的配置本来就不一样
     configHost.replaceChildren();
     tab.controls(configHost, ctx);
 
     // 结果面板只挂载一次，之后靠 `hidden` 切换。
-    // 不能「切走就 removeChild」：各 tab 的 update 闭包捕获的是自己那批节点，
-    // 节点被摘掉之后再切回来，update 会往已经脱离文档的节点里写，界面就是空的。
-    for (const panel of panelHost.children) {
-      (panel as HTMLElement).hidden = panel.getAttribute('data-tab') !== tab.id;
+    // 不能「切走就 removeChild」：各 tab 的 update 闭包捕获的是自己那批节点。
+    for (const p of panelHost.children) {
+      (p as HTMLElement).hidden = p.getAttribute('data-tab') !== tab.id;
     }
     if (!mountedTabs.has(tab.id)) {
-      const panel = node('section', {
+      const p = node('section', {
         class: 'tab-panel',
         id: `panel-${tab.id}`,
         role: 'tabpanel',
         'aria-labelledby': `tab-${tab.id}`,
         'data-tab': tab.id,
       });
-      if (tab.blurb) panel.append(node('p', { class: 'tab-blurb' }, tab.blurb));
-      panelHost.append(panel);
-      tab.mount(panel, ctx);
+      if (tab.blurb) p.append(node('p', { class: 'tab-blurb' }, tab.blurb));
+      panelHost.append(p);
+      tab.mount(p, ctx);
       mountedTabs.add(tab.id);
     }
 
@@ -898,7 +968,7 @@ export function mount(root: HTMLElement): void {
     }
   }
 
-  /** 只刷新当前 tab，并把其余已挂载的 tab 记为过期 */
+  /** 只刷新当前 tab，其余记为过期（切回去时 `selectTab` 会重算） */
   function refreshActiveTab(): void {
     for (const id of mountedTabs) if (id !== activeTab) staleTabs.add(id);
     if (!staleTabs.has(activeTab)) TAB_IMPL[activeTab]?.update?.();
@@ -913,36 +983,23 @@ export function mount(root: HTMLElement): void {
   applyTheme(state.theme);
 
   // -------------------------------------------------------------------------
-  // 事件
-  // -------------------------------------------------------------------------
 
   function applyTheme(theme: 'light' | 'dark'): void {
     document.documentElement.dataset['theme'] = theme;
-    themeBtn.textContent = theme === 'dark' ? '切到浅色' : '切到深色';
+    const toDark = theme === 'light';
+    themeBtn.title = toDark ? C.THEME_TO_DARK : C.THEME_TO_LIGHT;
+    themeBtn.setAttribute('aria-label', themeBtn.title);
+    themeBtn.replaceChildren(themeIcon(theme));
   }
 
   function setState(next: Partial<AppState>): void {
     state = { ...state, ...next };
-    render();
+    applyTheme(state.theme);
+    // 只同步配置栏的既有节点，**不重建**：目标分数输入框正在被输入时，
+    // 重建会夺走焦点，表现为「打字打一半光标飞了」。
+    TAB_IMPL[activeTab]?.syncControls?.();
+    refreshActiveTab();
   }
-
-  resetBtn.addEventListener('click', () => {
-    setState({ ...defaultShared(), ...defaultGrowth() });
-  });
-
-  shareBtn.addEventListener('click', async () => {
-    const url = `${location.origin}${location.pathname}?${toQuery(state)}#${activeTab}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      shareBtn.textContent = '已复制 ✓';
-      setTimeout(() => {
-        shareBtn.textContent = '复制链接';
-      }, 1500);
-    } catch {
-      // 剪贴板不可用（file:// 等）时退化为可手动复制
-      window.prompt('复制下面的链接：', url);
-    }
-  });
 
   themeBtn.addEventListener('click', () => {
     setState({ theme: state.theme === 'dark' ? 'light' : 'dark' });
@@ -953,16 +1010,5 @@ export function mount(root: HTMLElement): void {
     if (id !== activeTab) selectTab(id, false);
   });
 
-  // -------------------------------------------------------------------------
-
-  function render(): void {
-    applyTheme(state.theme);
-    // 只同步「配置栏」的既有节点，**不重建**：目标分数输入框正在被输入时，
-    // 重建会夺走焦点，表现为「打字打一半光标飞了」。
-    TAB_IMPL[activeTab]?.syncControls?.();
-    refreshActiveTab();
-  }
-
   selectTab(activeTab, false);
-  render();
 }

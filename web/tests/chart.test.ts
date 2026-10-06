@@ -58,6 +58,8 @@ describe('坐标轴工具', () => {
     expect(t[t.length - 1]).toBe(282);
     expect(tickIndices(5)).toEqual([0, 1, 2, 3, 4]);
     expect(tickIndices(0)).toEqual([]);
+    // 默认值要够稀疏（柱状图下面还有图例，刻度太密会抢视线）
+    expect(tickIndices(283).length).toBeLessThanOrEqual(9);
   });
 
   it('nearestIndex 找最近的分数', () => {

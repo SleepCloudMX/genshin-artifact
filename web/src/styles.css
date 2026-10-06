@@ -65,9 +65,34 @@ html, body {
 
 /* ---------- 头部 ---------- */
 .hero { margin-bottom: 20px; }
-.title-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .hero h1 { margin: 0; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: .2px; }
 .lede { margin: 6px 0 0; color: var(--text-dim); max-width: 76ch; font-size: 14px; }
+
+/* 图标按钮（主题切换）。放在标题行最右侧 */
+.icon-btn {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-soft); }
+.icon-btn svg { display: block; }
 
 /* ---------- 布局 ---------- */
 .layout {
@@ -92,6 +117,20 @@ html, body {
   box-shadow: var(--shadow);
 }
 .panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 650; letter-spacing: .2px; }
+/* 面板标题行：标题在左，操作在右 */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  margin-bottom: 10px;
+}
+.panel-head h2 { margin: 0; }
+.panel-actions { display: flex; gap: 6px; flex: none; }
+/* 图表面板：标题已经说明了一切，内部不再垫额外留白 */
+.panel.flush { padding-bottom: 6px; }
+.panel-body > .chart-wrap:last-child { margin-bottom: 0; }
 .panel h3.sub {
   margin: 0 0 4px;
   font-size: 13px;
@@ -110,6 +149,9 @@ html, body {
 /* ---------- 表单 ---------- */
 .field { display: block; margin-bottom: 12px; }
 .field > span { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 4px; }
+/* 两个字段并排（主词条 / 初始） */
+.field-pair { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 8px; }
+.field-pair .field { margin-bottom: 12px; }
 
 select, input[type='number'] {
   width: 100%;
@@ -254,6 +296,42 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 }
 
 .tab-panel[hidden] { display: none; }
+
+/* ---------- 子 tab（一张图一页，避免上下滚动） ---------- */
+.subtabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.subtab {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 6px 13px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.subtab:hover { color: var(--text); }
+.subtab.on {
+  background: var(--bg-elev);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+.subtab-panel[hidden] { display: none; }
+/* 子 tab 里的面板不需要再叠一层底 */
+.subtab-panel .panel { box-shadow: none; }
 
 /* ---------- 指标卡 ---------- */
 .cards {

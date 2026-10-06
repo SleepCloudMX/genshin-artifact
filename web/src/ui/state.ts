@@ -55,26 +55,84 @@ export interface AppState extends SharedConfig, GrowthConfig {}
 /** 槽位的固定填充顺序，决定「哪条占第 1 个槽位」——影响 3 词条胚子的建模 */
 export const SLOT_ORDER: readonly SubAttr[] = SUB_ATTRS;
 
-export function defaultState(): AppState {
-  return {
-    ...defaultShared(),
-    ...defaultGrowth(),
-  };
+/**
+ * 各副词条的**默认计分权重**。
+ *
+ * 口径来自社区常用的「双暴 2:1」：一条暴击的收益约等于两条暴伤，
+ * 所以暴击 2、暴伤 1；**其余词条默认 0**（不计分）。
+ *
+ * 这个表有两处用途，改它要同时想到：
+ *   1. `defaultShared()` 的初始值；
+ *   2. 权重 `+` / `−` 按钮的落点——`+` 从 0 跳到该词条的默认权重，
+ *      `−` 从默认权重减到 0（见 `nextWeightUp` / `nextWeightDown`）。
+ *      所以「选暴击后权重自动是 2」是自然结果，不需要额外特判。
+ */
+export const CANONICAL_WEIGHT: Record<SubAttr, number> = {
+  小生命: 0, 小攻击: 0, 小防御: 0,
+  大生命: 0, 大防御: 0, 大攻击: 0,
+  暴击: 2, 暴伤: 1,
+  充能: 0, 精通: 0,
+};
+
+/** 权重步长 */
+export const WEIGHT_STEP = 0.1;
+
+/**
+ * 从 0 起步时 `+` 落到哪里。
+ *
+ * 有默认权重的词条落到默认值（暴击一次到 2）；其余词条落到 1 ——
+ * 它们是「临时想给点分」才加上的，用 1 当起点比 0.1 合理得多。
+ */
+export function stepStart(attr: SubAttr | ''): number {
+  if (attr === '') return WEIGHT_STEP;
+  return CANONICAL_WEIGHT[attr] || 1;
+}
+
+/** 浮点加减后归整到两位小数，避免 `0.1` 反复累加攒出 `0.30000000000000004` */
+function round2(x: number): number {
+  return Math.round(x * 100) / 100;
 }
 
 /**
- * 默认配置：主词条 `大攻击`，副词条 `暴击 1` / `暴伤 1`。
+ * `+` 的下一档：当前为 0 时直接落到 `stepStart`（暴击一次到 2），
+ * 否则按步长递加。这样「加一个词条」是一次点击，而不是点二十下。
+ */
+export function nextWeightUp(attr: SubAttr | '', weight: number): number {
+  if (!(weight > 0)) return stepStart(attr);
+  return round2(weight + WEIGHT_STEP);
+}
+
+/**
+ * `−` 的下一档：正好停在默认权重时直接归零（暴击 2 → 0），否则按步长递减。
+ * 归零这一下是刻意的——默认权重往往是最常用的口径，再往下按通常就是「不要它了」。
+ */
+export function nextWeightDown(attr: SubAttr | '', weight: number): number {
+  if (!(weight > 0)) return 0;
+  const base = attr === '' ? 0 : CANONICAL_WEIGHT[attr];
+  if (base > 0 && Math.abs(weight - base) < 1e-9) return 0;
+  return Math.max(0, round2(weight - WEIGHT_STEP));
+}
+
+/** 选中某词条时的权重初值：有默认口径就用它，否则用 `stepStart`（1） */
+export function weightOnSelect(attr: SubAttr | ''): number {
+  if (attr === '') return 0;
+  return CANONICAL_WEIGHT[attr] || 1;
+}
+
+/**
+ * 默认配置。
  *
- * 后两个槽位**留空、权重 0**：默认口径只有暴击暴伤两条计分，
- * 把 `充能`/`精通` 摆在那里会让指标卡显示「计分槽位 2/4」而下拉却像有 4 条，
- * 自相矛盾。留空反而更明确。
+ * - 主词条 `火伤`：它不在副词条池里，**副词条可选集是完整的**——
+ *   用 `大攻击` 之类的当默认值会白白少一个选项，让人以为漏了东西。
+ * - 副词条只有 `暴击 2` / `暴伤 1`，后两行留空。摆着权重 0 的词条会让
+ *   「计分槽位 2/4」和看起来有 4 条的表格自相矛盾。
  */
 export function defaultShared(): SharedConfig {
   return {
-    mainAttr: '大攻击',
+    mainAttr: '火伤',
     slots: [
-      { attr: '暴击', weight: 1, initialRoll: 'random' },
-      { attr: '暴伤', weight: 1, initialRoll: 'random' },
+      { attr: '暴击', weight: CANONICAL_WEIGHT['暴击'], initialRoll: 'random' },
+      { attr: '暴伤', weight: CANONICAL_WEIGHT['暴伤'], initialRoll: 'random' },
       { attr: '', weight: 0, initialRoll: 'random' },
       { attr: '', weight: 0, initialRoll: 'random' },
     ],
@@ -84,6 +142,11 @@ export function defaultShared(): SharedConfig {
 
 export function defaultGrowth(): GrowthConfig {
   return { initialVisible: 4, targetScore: 30 };
+}
+
+/** 完整默认状态（两个 tab 的配置合起来） */
+export function defaultState(): AppState {
+  return { ...defaultShared(), ...defaultGrowth() };
 }
 
 // ---------------------------------------------------------------------------

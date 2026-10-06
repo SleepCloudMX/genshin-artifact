@@ -77,8 +77,10 @@ export function niceAxis(max: number, targetTicks = 4): { max: number; step: num
 /**
  * 取 X 轴要标注的下标：最多 `maxLabels` 个，均匀分布且**必含首尾**。
  * 用「取整步长」而不是旋转 45° 的文字——分数有 200+ 个时旋转标签会糊成一片。
+ *
+ * 默认 8：柱状图下面还有图例，刻度太密会和柱子抢视线。
  */
-export function tickIndices(count: number, maxLabels = 12): number[] {
+export function tickIndices(count: number, maxLabels = 8): number[] {
   if (count <= 0) return [];
   if (count <= maxLabels) return Array.from({ length: count }, (_, i) => i);
   const stride = Math.ceil(count / maxLabels);
@@ -106,11 +108,13 @@ function frame(opts: {
   width: number;
   height: number;
   margin: { top: number; right: number; bottom: number; left: number };
-  title: string;
+  /** `undefined` = 不画图内标题（`exactOptionalPropertyTypes` 下不能传可选属性） */
+  title: string | undefined;
   ariaLabel: string;
-  legendRows?: number;
 }): Frame {
-  const { width, height, margin, title, ariaLabel } = opts;
+  const { width, height, title, ariaLabel } = opts;
+  // 没有图内标题时不需要顶部留白（面板标题由外层 HTML 负责，语义更好）
+  const margin = { ...opts.margin, top: title ? opts.margin.top : 16 };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
 
@@ -214,7 +218,8 @@ export interface ChartMarker {
 export interface ScoreChartOptions {
   data: StackedDatum[];
   hitLabels: string[];
-  title: string;
+  /** 图内标题；省略则不留标题位（面板标题通常由外层 HTML 提供） */
+  title?: string;
   /** 若给出，则在该分数处画一条竖向参考线（目标分数） */
   marker?: ChartMarker;
   width?: number;
@@ -232,7 +237,7 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
     height,
     margin: { top: 40, right: 18, bottom: 56 + legendRows * 18, left: 52 },
     title,
-    ariaLabel: title,
+    ariaLabel: title ?? '得分分布',
   });
 
   if (data.length === 0) return f.svg;
@@ -380,7 +385,7 @@ export interface SurvivalChartOptions {
   scores: number[];
   /** P(得分 ≥ scores[i]) */
   survival: number[];
-  title: string;
+  title?: string;
   marker?: ChartMarker;
   width?: number;
   height?: number;
@@ -396,7 +401,7 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
     height,
     margin: { top: 40, right: 18, bottom: 56, left: 52 },
     title,
-    ariaLabel: title,
+    ariaLabel: title ?? 'P(得分 ≥ 分数线)',
   });
 
   if (scores.length === 0) return f.svg;
@@ -535,7 +540,7 @@ export interface HistogramItem {
 
 export interface HistogramOptions {
   items: HistogramItem[];
-  title: string;
+  title?: string;
   /** 数值格式化，默认百分比 */
   format?: (v: number) => string;
   /** 纵轴上限；省略则自适应 */
@@ -555,7 +560,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
     height,
     margin: { top: 40, right: 18, bottom: 48, left: 52 },
     title,
-    ariaLabel: title,
+    ariaLabel: title ?? '分布',
   });
 
   if (items.length === 0) return f.svg;
