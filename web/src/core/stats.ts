@@ -37,7 +37,7 @@ export const SUB_WEIGHT_SUM = SUB_ATTRS.reduce((s, a) => s + SUB_WEIGHTS[a], 0);
 
 /**
  * 主词条权重（官方千分比数据）。
- * 沙的和 = 5000，杯的和 = 3800；头用的是相对权重（和 = 50），
+ * 沙的和 = 5000，杯的和 = 4000；头用的是相对权重（和 = 50），
  * 所以 P(暴击主词条) = 5/50 = 0.10 —— 这是近似，不是精确的 1/7。
  */
 export const MAIN_WEIGHTS: Record<Position, Partial<Record<MainAttr, number>>> = {
@@ -111,6 +111,49 @@ export function mainProbabilities(position: Position): { attr: MainAttr; p: numb
     attr: attr as MainAttr,
     p: (w ?? 0) / total,
   }));
+}
+
+/**
+ * 各部位「可用的主词条集合」与「主词条概率」。
+ *
+ * 主词条要按**部位**分开算：沙不会出元素伤害、头不会出充能，
+ * 所以「火伤主词条」的概率必须取「杯」那一行的 1/10，而不是把三张表混在一起。
+ *
+ * 权重表只覆盖各部位**可出现**的条目，因此这里不需要额外过滤。
+ */
+export function mainAttrsByPosition(): { position: Position; attr: MainAttr; p: number }[] {
+  const out: { position: Position; attr: MainAttr; p: number }[] = [];
+  for (const position of POSITIONS) {
+    for (const { attr, p } of mainProbabilities(position)) out.push({ position, attr, p });
+  }
+  return out;
+}
+
+/**
+ * 给定主词条时，该主词条的掉落概率。
+ *
+ * 「掉落时主词条正好是 X」= `P(掉到能出 X 的某个部位) × P(X | 部位)`。
+ * 元素伤害/物伤/治疗只在杯上（`POSITION_PROBABILITY × 1/10`），
+ * 大攻击则在沙/杯/头都有可能，三处相加。
+ */
+export function mainAttrProbability(mainAttr: MainAttr): number | undefined {
+  const hits = mainAttrsByPosition().filter((e) => e.attr === mainAttr);
+  if (hits.length === 0) return undefined;
+  return hits.reduce((s, e) => s + e.p, 0) * POSITION_PROBABILITY;
+}
+
+/**
+ * 一次掉落里，圣遗物落到**指定部位**的概率。
+ *
+ * 注意别和 `POSITIONS.length` 混了：`POSITIONS` 只有沙/杯/头三种**类型**
+ * （花与羽没有主词条、也没有副词条随机性，不在本项目的模型里），
+ * 而一套五星圣遗物有 5 个部位，掉到其中某一个特定部位是 1/5。
+ */
+export const POSITION_PROBABILITY = 1 / 5;
+
+/** 给定主词条后，它**可能出现的部位**（火伤只会在杯上） */
+export function positionsOf(mainAttr: MainAttr): Position[] {
+  return POSITIONS.filter((p) => MAIN_WEIGHTS[p][mainAttr] !== undefined);
 }
 
 /** 给定主词条后的可用副词条池（权重表） */

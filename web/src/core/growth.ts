@@ -182,14 +182,16 @@ function slotTables(attr: SubAttr, weight: number, initialRoll: InitialRoll): nu
   return tables;
 }
 /**
- * 某词条「成长到第 t 档」的展示文案，如 `4.1%`；带权重时显示实际计分值 `4.1`。
- * 界面用它给初始档位的下拉选项打标签——不给数字的话用户没法判断选哪档。
+ * 某词条「成长到第 t 档」的展示文案，如 `2.7`；带权重时显示计分值，如权重 2 → `5.4`。
+ *
+ * **固定一位小数，不要把尾随的 0 去掉**：成长值本身是游戏里四舍五入过的
+ * （暴伤四档是 5.4 / 6.2 / 7.0 / 7.8），`7` 和 `7.0` 表达的有效位数不同，
+ * 而「7.0」才是数据本身的样子。同理权重 2 的暴击是 5.4 / 6.2 / 7.0 / 7.8。
  */
 export function tierLabel(attr: SubAttr, tier: number, weight = 1): string {
   const g = GROWTHS[attr][tier as 0 | 1 | 2 | 3];
   if (g === undefined) return '—';
-  const scaled = growthScaled(g) * weight;
-  return `${(scaled / SCALE).toFixed(2).replace(/\.?0+$/, '')}`;
+  return (g * weight).toFixed(1);
 }
 
 // ---------------------------------------------------------------------------

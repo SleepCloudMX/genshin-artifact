@@ -41,6 +41,7 @@ import {
   qualityDistribution,
   pieSlices,
   comboLabel,
+  dropProbability,
   type QualityDistribution,
 } from '../core/quality';
 import {
@@ -571,6 +572,7 @@ export function mount(root: HTMLElement): void {
                   score: state.targetScore,
                   label: C.markerScore(fmtScore(state.targetScore)),
                 },
+                host: chart,
                 tooltip: tabCtx.tooltip,
               }),
             );
@@ -593,6 +595,7 @@ export function mount(root: HTMLElement): void {
                 ...(at > 0
                   ? { marker: { score: state.targetScore, label: C.markerProb(pct(at)) } }
                   : {}),
+                host: chart,
                 tooltip: tabCtx.tooltip,
               }),
             );
@@ -612,17 +615,18 @@ export function mount(root: HTMLElement): void {
             chart.append(
               renderHistogram({
                 items: hitProbs.map((h) => ({
-                  label: C.hitBucketLabel(h.hits),
+                  label: C.hitLabel(h.hits),
                   value: h.p,
                   color: hitColor(h.hits),
                 })),
                 title: C.HIT_CHART_TITLE,
+                host: chart,
                 tooltip: tabCtx.tooltip,
               }),
             );
             t.body.replaceChildren(
               ...hitProbs.map((h) =>
-                row([C.hitBucketLabel(h.hits), pct(h.p), oneIn(1 / h.p)]),
+                row([C.hitLabel(h.hits), pct(h.p), oneIn(1 / h.p)]),
               ),
             );
           },
@@ -674,14 +678,21 @@ export function mount(root: HTMLElement): void {
           score: s,
           byHit: byHit.map((r) => r[i] ?? 0),
         }));
-        hitLabels = Array.from({ length: table.hitBuckets }, (_, h) => `命中 ${h} 次`);
+        hitLabels = Array.from({ length: table.hitBuckets }, (_, h) => C.hitLabel(h));
 
         const p = probAtLeast(table, state.targetScore);
         const attempts = expectedAttempts(table, state.targetScore);
         const best = table.scores[table.scores.length - 1] ?? 0;
 
+        // 掉落概率：不含成长值，只回答「能不能刷到这件胚子」
+        const drop = dropProbability({ mainAttr: state.mainAttr, weights: weightMap(state) });
+        const dropNote =
+          drop.p > 0
+            ? C.dropBreakdown(pct(drop.mainP), pct(drop.subsP))
+            : C.DROP_OUT_OF_RANGE;
+
         cards.replaceChildren(
-          card(C.CARD_TARGET, `${fmtScore(state.targetScore)} 分`, C.CARD_TARGET_NOTE),
+          card(C.CARD_DROP, pct(drop.p), dropNote),
           card(C.CARD_REACH, pct(p), C.reachNote(fmtScore(state.targetScore))),
           card(C.CARD_ATTEMPTS, attempts ? oneIn(attempts) : '—', C.CARD_ATTEMPTS_NOTE),
           card(C.CARD_BEST, fmtScore(best), C.scoredSlotsNote(scoredCount)),
@@ -740,6 +751,7 @@ export function mount(root: HTMLElement): void {
                   note: b.combos.length > 1 ? C.sameScoreCombos(b.combos.length) : undefined,
                 })),
                 title: C.AXIS_SCORE,
+                host: chart,
                 tooltip: tabCtx.tooltip,
               }),
             );

@@ -91,6 +91,40 @@ export function tickIndices(count: number, maxLabels = 8): number[] {
 }
 
 // ---------------------------------------------------------------------------
+// 尺寸：按容器宽度定高，避免图被"压扁"
+// ---------------------------------------------------------------------------
+
+export interface ChartSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * 按容器宽度算出一个**不扁**的画布尺寸。
+ *
+ * 固定 `viewBox` 的图在宽屏上会被横向拉伸——`preserveAspectRatio` 保持的是比例，
+ * 但比例本身是错的（1180×400 在 1080px 宽的面板里会变成一条扁带）。
+ * 所以按容器实际宽度反推高度，把宽高比控制在期望值附近。
+ *
+ * 取不到尺寸时（jsdom、未挂载）回落到默认值，测试仍能断言结构。
+ */
+export function fitSize(
+  host: HTMLElement | null | undefined,
+  opts: { ratio?: number; minW?: number; maxW?: number; minH?: number; maxH?: number } = {},
+): ChartSize {
+  const ratio = opts.ratio ?? 0.34; // 高 / 宽
+  const minW = opts.minW ?? 720;
+  const maxW = opts.maxW ?? 1320;
+  const minH = opts.minH ?? 260;
+  const maxH = opts.maxH ?? 460;
+
+  const measured = host?.clientWidth ?? 0;
+  const width = Math.round(Math.min(maxW, Math.max(minW, measured || 1040)));
+  const height = Math.round(Math.min(maxH, Math.max(minH, width * ratio)));
+  return { width, height };
+}
+
+// ---------------------------------------------------------------------------
 // 通用骨架
 // ---------------------------------------------------------------------------
 
@@ -222,6 +256,8 @@ export interface ScoreChartOptions {
   title?: string;
   /** 若给出，则在该分数处画一条竖向参考线（目标分数） */
   marker?: ChartMarker;
+  /** 用来量宽度，好把图画得宽一点而不是被压扁 */
+  host?: HTMLElement | null;
   width?: number;
   height?: number;
   tooltip: Tooltip;
@@ -229,8 +265,10 @@ export interface ScoreChartOptions {
 
 export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
   const { data, hitLabels, title, marker, tooltip } = opts;
-  const width = opts.width ?? 1180;
-  const height = opts.height ?? 400;
+  // 柱状图下面还有图例，所以画布要高一点；图例占掉的高度另外扣
+  const fit = fitSize(opts.host, { ratio: 0.46, minH: 380, maxH: 620 });
+  const width = opts.width ?? fit.width;
+  const height = opts.height ?? fit.height;
   const legendRows = Math.ceil((hitLabels.length * 90) / 900) + 1;
   const f = frame({
     width,
@@ -387,6 +425,7 @@ export interface SurvivalChartOptions {
   survival: number[];
   title?: string;
   marker?: ChartMarker;
+  host?: HTMLElement | null;
   width?: number;
   height?: number;
   tooltip: Tooltip;
@@ -394,8 +433,9 @@ export interface SurvivalChartOptions {
 
 export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   const { scores, survival, title, marker, tooltip } = opts;
-  const width = opts.width ?? 1180;
-  const height = opts.height ?? 320;
+  const fit = fitSize(opts.host, { ratio: 0.34, minH: 280, maxH: 460 });
+  const width = opts.width ?? fit.width;
+  const height = opts.height ?? fit.height;
   const f = frame({
     width,
     height,
@@ -545,6 +585,7 @@ export interface HistogramOptions {
   format?: (v: number) => string;
   /** 纵轴上限；省略则自适应 */
   upper?: number;
+  host?: HTMLElement | null;
   width?: number;
   height?: number;
   tooltip: Tooltip;
@@ -553,8 +594,9 @@ export interface HistogramOptions {
 export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   const { items, title, tooltip } = opts;
   const format = opts.format ?? ((v: number) => pct(v, 2));
-  const width = opts.width ?? 1180;
-  const height = opts.height ?? 260;
+  const fit = fitSize(opts.host, { ratio: 0.30, minH: 260, maxH: 420 });
+  const width = opts.width ?? fit.width;
+  const height = opts.height ?? fit.height;
   const f = frame({
     width,
     height,

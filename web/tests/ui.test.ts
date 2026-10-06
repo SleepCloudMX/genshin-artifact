@@ -584,10 +584,54 @@ describe('页面文案', () => {
 describe('得分分布页', () => {
   beforeEach(() => resetUrl());
 
-  it('四张指标卡', () => {
+  it('四张指标卡：掉落概率 / 达到概率 / 大致要刷 / 最高可能分', () => {
     const root = freshRoot();
     mount(root);
+    const labels = [...root.querySelectorAll('.tab-panel:not([hidden]) .card-label')].map(
+      (n) => n.textContent,
+    );
+    expect(labels).toEqual([C.CARD_DROP, C.CARD_REACH, C.CARD_ATTEMPTS, C.CARD_BEST]);
     expect(cardValues(root)).toHaveLength(4);
+  });
+
+  it('卡片里不再放「目标分数」——它是输入，摆在结果里像算出来的', () => {
+    const root = freshRoot();
+    mount(root);
+    const labels = [...root.querySelectorAll('.tab-panel:not([hidden]) .card-label')].map(
+      (n) => n.textContent,
+    );
+    expect(labels).not.toContain('目标分数');
+  });
+
+  it('掉落概率卡片给出概率与「部位 × 主词条 × 副词条」的拆解', () => {
+    const root = freshRoot();
+    mount(root);
+    const card = root.querySelector('.tab-panel:not([hidden]) .card')!;
+    expect(card.querySelector('.card-label')!.textContent).toBe(C.CARD_DROP);
+    // 火伤主词条 + 要暴击暴伤
+    expect(Number((card.querySelector('.card-value')!.textContent ?? '').replace('%', ''))).toBeGreaterThan(0);
+    expect(card.querySelector('.card-note')!.textContent).toContain('部位 1/5');
+  });
+
+  it('掉落概率随要求的副词条增多而下降', () => {
+    const root = freshRoot();
+    mount(root);
+    const dropOf = () =>
+      Number((root.querySelector('.tab-panel:not([hidden]) .card-value')!.textContent ?? '').replace('%', ''));
+
+    const two = dropOf();
+    // 把第 3 行也变成计分词条
+    setSelect(attrSelects(root)[2]!, '充能');
+    const three = dropOf();
+    expect(three).toBeLessThan(two);
+  });
+
+  it('主词条与副词条冲突时掉落概率为 0（不可能的事件）', () => {
+    const root = freshRoot();
+    mount(root);
+    // 主词条改成暴击 → 原本要求的暴击副词条被剔掉，只剩暴伤，仍然 > 0
+    setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, '暴击');
+    expect(cardValues(root)[0]).not.toBe('0%');
   });
 
   it('主词条火伤、暴击2暴伤1 时最高分是 55.4', () => {

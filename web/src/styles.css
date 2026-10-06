@@ -107,6 +107,8 @@ html, body {
 @media (min-width: 1001px) {
   .sticky { position: sticky; top: 16px; }
 }
+/* 结果栏是弹性列：子 tab 面板可以撑开，图就不必挤在顶部留一大片空白 */
+.results { display: flex; flex-direction: column; }
 
 .panel {
   background: var(--bg-elev);
@@ -332,6 +334,16 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 .subtab-panel[hidden] { display: none; }
 /* 子 tab 里的面板不需要再叠一层底 */
 .subtab-panel .panel { box-shadow: none; }
+/* 单张图的面板撑满剩余高度，图就不会缩在顶部、下面留一大片空白 */
+.subtab-panel { display: flex; flex-direction: column; }
+.subtab-panel > .panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.subtab-panel > .panel > .panel-body { flex: 1; min-height: 0; }
+.subtab-panel .chart-wrap svg { display: block; }
 
 /* ---------- 指标卡 ---------- */
 .cards {

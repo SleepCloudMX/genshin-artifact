@@ -10,7 +10,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { SUB_ATTRS, type MainAttr, type SubAttr } from '../src/core/stats';
+import {
+  SUB_ATTRS,
+  POSITION_PROBABILITY,
+  mainAttrProbability,
+  positionsOf,
+  type MainAttr,
+  type SubAttr,
+} from '../src/core/stats';
+import { dropProbability } from '../src/core/quality';
 import { exact4ComboProb, attrsProb, allPossibleAttrsProb, combinations } from '../src/core/combo';
 import {
   scoreDistribution,
@@ -22,6 +30,7 @@ import {
   hitProbabilities,
   expectedAttempts,
   scoreAtAlpha,
+  tierLabel,
   type ArtifactSpec,
   type Slot,
 } from '../src/core/growth';
@@ -298,6 +307,83 @@ describe('派生指标', () => {
     const three = baseline.growth.find((x) => x.name === '3r-crit-dmg')!;
     const maxOf = (x: typeof four) => Math.max(...x.dense.map((d) => (d as [number, number[]])[0]));
     expect(maxOf(three)).toBeLessThan(maxOf(four));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 掉落概率（不含成长值）
+// ---------------------------------------------------------------------------
+describe('掉落概率', () => {
+  it('部位概率是 1/5，主词条概率按部位取（火伤只在杯上）', () => {
+    // 一套五星圣遗物有 5 个部位，掉到指定部位（如杯）是 1/5；
+    // 别和 POSITIONS.length（3 种有主词条的类型）混了
+    expect(POSITION_PROBABILITY).toBeCloseTo(0.2, 12);
+    expect(positionsOf('火伤')).toEqual(['杯']);
+    expect(mainAttrProbability('火伤')).toBeCloseTo(0.2 * (200 / 4000), 12);
+  });
+
+  it('暴击可以是头的主词条，概率按部位取平均', () => {
+    expect(positionsOf('暴击')).toContain('头');
+    // 头：5/50；暴击不是杯的主词条 → 平均只有头那一项 / 5
+    expect(mainAttrProbability('暴击')).toBeCloseTo(0.2 * (5 / 50), 12);
+  });
+
+  it('不要副词条时只剩「部位 × 主词条」', () => {
+    const d = dropProbability({ mainAttr: '火伤', weights: {} });
+    expect(d.subsP).toBe(1);
+    expect(d.p).toBeCloseTo(d.mainP, 12);
+    expect(d.p).toBeCloseTo(0.2 * (200 / 4000), 12);
+  });
+
+  it('要暴击 + 暴伤时，副词条概率就是「同时含有这两条」', () => {
+    const d = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } });
+    expect(d.subsP).toBeCloseTo(attrsProb('火伤', ['暴击', '暴伤']), 12);
+    expect(d.subsP).toBeLessThan(1);
+    expect(d.p).toBeCloseTo(d.mainP * d.subsP, 12);
+  });
+
+  it('要求越多副词条，概率越小', () => {
+    const one = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } });
+    const two = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1 } });
+    const three = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 暴伤: 1, 充能: 1 } });
+    expect(two.p).toBeLessThan(one.p);
+    expect(three.p).toBeLessThan(two.p);
+  });
+
+  it('要求 5 条副词条时概率为 0（终态只有 4 条）', () => {
+    const d = dropProbability({
+      mainAttr: '火伤',
+      weights: { 暴击: 2, 暴伤: 1, 充能: 1, 大攻击: 1, 精通: 1 },
+    });
+    expect(d.subsP).toBe(0);
+    expect(d.p).toBe(0);
+  });
+
+  it('权重为 0 的词条不参与约束（「不计分」= 通配）', () => {
+    const a = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2, 充能: 0 } });
+    const b = dropProbability({ mainAttr: '火伤', weights: { 暴击: 2 } });
+    expect(a.p).toBeCloseTo(b.p, 12);
+  });
+
+  it('主词条会从副词条池里排除，所以不能把它自己算成约束', () => {
+    // 暴击当主词条时，「要暴击副词条」的概率是 0（游戏里不可能）
+    expect(dropProbability({ mainAttr: '暴击', weights: { 暴击: 2 } }).subsP).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 分档文案
+// ---------------------------------------------------------------------------
+describe('初始档位的展示文案', () => {
+  it('固定一位小数 —— 7 和 7.0 语义不同，不要抹掉尾随的 0', () => {
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴伤', t))).toEqual(['5.4', '6.2', '7.0', '7.8']);
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t))).toEqual(['2.7', '3.1', '3.5', '3.9']);
+  });
+
+  it('带权重时显示「成长值 × 权重」（这一档值多少分）', () => {
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t, 2))).toEqual(['5.4', '6.2', '7.0', '7.8']);
+    // 小生命是原始量纲（209 等），权重 0.01 → 2.09 附近
+    expect(tierLabel('小生命', 0, 0.01)).toBe('2.1');
   });
 });
 

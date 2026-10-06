@@ -27,8 +27,19 @@
  * 结果相同但不会产生无意义的 0 概率组合。见 `stats.excludedSubstat`。
  */
 
-import { SUB_ATTRS, canonicalMainAttr, excludedSubstat, type MainAttr, type SubAttr } from './stats';
-import { allPossibleAttrsProb } from './combo';
+import {
+  POSITION_PROBABILITY,
+  POSITIONS,
+  SUB_ATTRS,
+  canonicalMainAttr,
+  excludedSubstat,
+  mainProbabilities,
+  positionsOf,
+  type MainAttr,
+  type Position,
+  type SubAttr,
+} from './stats';
+import { allPossibleAttrsProb, attrsProb } from './combo';
 
 /** 权重的整数刻度：与 `growth.SCALE` 同一个思路，得分按千分之一分累加 */
 export const WEIGHT_SCALE = 1000;
@@ -259,4 +270,62 @@ export function pieSlices(
 /** 某分片是否含指定词条（用于饼图 / 堆叠图的高亮） */
 export function sliceContains(slice: PieSlice, attr: SubAttr): boolean {
   return slice.combos.some((c) => c.combo.includes(attr));
+}
+
+// ---------------------------------------------------------------------------
+// 掉落概率：把「部位 × 主词条 × 副词条」先验乘起来
+// ---------------------------------------------------------------------------
+
+export interface DropProbability {
+  /** 当前主词条可能出现的部位；元素伤害/物伤/治疗只在杯上 */
+  positions: Position[];
+  /** 掉落时主词条正好是这个的概率（对部位取平均） */
+  mainP: number;
+  /** 副词条包含全部「计分词条」的概率 */
+  subsP: number;
+  /** 相乘的结果 */
+  p: number;
+}
+
+/**
+ * 掉落一个「主词条 = X，且副词条包含全部计分词条」的胚子的概率。
+ *
+ * **不含成长值**——只回答「能不能刷到这件胚子」，不回答「练满多少分」。
+ *
+ * ## 「（不计分）」的语义
+ *
+ * 权重为 0 的槽位是**通配**：那些位置是什么词条都行，不参与约束。
+ * 所以只有「权重 > 0 的词条」进入 `attrs`，`excluded` 传空。
+ *
+ * ## 概率的组成
+ *
+ * ```
+ * p = P(掉到能出这个主词条的某个部位) × P(主词条 = X | 部位) × P(副词条 ⊇ 计分词条)
+ * ```
+ *
+ * 部位是 1/5（五件等概率），主词条概率由官方千分比体重表给出，
+ * 副词条用加权不放回抽样的组合概率（`combo.attrsProb`）。
+ *
+ * 注意这不等于「刷一次副本的出货率」：一次副本掉几件、以及 3/4 词条的比例
+ * 都不在此模型内（见 `memory.md` §9 的外部不确定性）。
+ */
+export function dropProbability(spec: QualitySpec): DropProbability {
+  const positions = positionsOf(spec.mainAttr);
+  const canonical = canonicalMainAttr(spec.mainAttr);
+  // 主词条概率 = 各可能部位上的概率之和 / 5（部位是 1/5）
+  const mainP =
+    positions.reduce(
+      (s, pos) => s + (mainProbabilities(pos).find((e) => e.attr === spec.mainAttr)?.p ?? 0),
+      0,
+    ) * POSITION_PROBABILITY;
+
+  const attrs = qualityAttrs(spec.mainAttr, spec.weights);
+  // 用户**确实**要求了词条（权重 > 0），但它们全被主词条冲突剔掉了
+  // → 这是一个不可能的组合，概率 0，而不是「没有约束」的 1
+  const requested = SUB_ATTRS.filter((a) => (spec.weights[a] ?? 0) > 0);
+  // 必须用规范化的主词条名（爆伤 → 暴伤），否则「要暴伤副词条」会被算成可能
+  const subsP =
+    requested.length === 0 ? 1 : attrs.length === 0 ? 0 : attrsProb(canonical, attrs);
+
+  return { positions, mainP, subsP, p: mainP * subsP };
 }

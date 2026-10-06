@@ -82,8 +82,6 @@ export const SUB_ATTRS = '词条概率';
 // 指标卡
 // ---------------------------------------------------------------------------
 
-export const CARD_TARGET = '目标分数';
-export const CARD_TARGET_NOTE = '在左栏修改';
 export const CARD_REACH = '达到概率';
 export function reachNote(target: string): string {
   return `得分 ≥ ${target}`;
@@ -94,6 +92,14 @@ export const CARD_BEST = '最高可能分';
 export function scoredSlotsNote(n: number): string {
   return `计分槽位 ${n}/4`;
 }
+
+/** 掉落概率：不含成长值，只回答「能不能刷到这件胚子」 */
+export const CARD_DROP = '掉落概率';
+export function dropBreakdown(main: string, subs: string): string {
+  return `部位 1/5 × 主词条 ${main} × 副词条 ${subs}`;
+}
+/** 主词条不在任何部位的主词条表里（理论上不会发生，防御性文案） */
+export const DROP_OUT_OF_RANGE = '这个主词条不在任何部位的主词条表里';
 
 export const CARD_ATTRS = '有效词条';
 export const CARD_MEAN = '期望得分';
@@ -123,8 +129,8 @@ export function markerScore(score: string): string {
 export function markerProb(p: string): string {
   return `p = ${p}`;
 }
-/** 悬停浮框里的一行 */
-export function hitBucketLabel(hits: number): string {
+/** 命中档的显示名，如 `命中 2 次`。命中次数是整数台阶，界面各处共用 */
+export function hitLabel(hits: number): string {
   return `命中 ${hits} 次`;
 }
 export function sameScoreCombos(n: number): string {
