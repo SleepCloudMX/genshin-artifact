@@ -74,9 +74,17 @@ html, body {
 .hero h1 { margin: 0; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: .2px; }
 .lede { margin: 6px 0 0; color: var(--text-dim); max-width: 76ch; font-size: 14px; }
 
-/* 图标按钮（主题切换）。放在标题行最右侧 */
-.icon-btn {
+/* 标题行右侧的图标组（源码链接 + 主题切换）。靠右对齐靠这一层，不是靠单个按钮 */
+.title-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 图标按钮（链接与按钮共用）。尺寸一致，避免两者高度不齐 */
+.icon-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -91,6 +99,7 @@ html, body {
   cursor: pointer;
   transition: color .15s, border-color .15s, background .15s;
 }
+a.icon-btn { text-decoration: none; }
 .icon-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-soft); }
 .icon-btn svg { display: block; }
 

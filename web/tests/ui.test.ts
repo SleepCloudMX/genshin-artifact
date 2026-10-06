@@ -671,6 +671,24 @@ describe('页面文案', () => {
     expect(btn.querySelector('svg')).not.toBeNull();
   });
 
+  it('标题行右侧有源码仓库链接，与主题按钮并排', () => {
+    const root = freshRoot();
+    mount(root);
+    const link = root.querySelector<HTMLAnchorElement>('#repoLink')!;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe(C.REPO_URL);
+    expect(link.getAttribute('aria-label')).toBe(C.REPO_LINK);
+    // 新窗口打开，且不要 referrer / opener
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.querySelector('svg')).not.toBeNull();
+    expect(link.textContent).toBe('');
+
+    // 两个图标同属一个靠右的容器 —— 否则 `margin-left: auto` 只会推第一个
+    const actions = root.querySelector('.title-actions')!;
+    expect(actions.querySelectorAll('#repoLink, #themeBtn')).toHaveLength(2);
+  });
+
   it('切主题不影响结果', () => {
     const root = freshRoot();
     mount(root);

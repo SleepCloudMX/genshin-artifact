@@ -75,6 +75,15 @@ describe.skipIf(!hasBuild)('构建产物自包含', () => {
     expect(/["'(]\.?\/?assets\//i.test(html), '产物里引用了 assets/').toBe(false);
   });
 
+  it('图标是外链、没有被内联或改写成相对路径', () => {
+    // 图标放在作者自己的仓库里，是稳定地址，因此直接外链、不下载进本仓库。
+    // 要盯的是 Vite 的 HTML 处理：它会把**相对** URL 当资源打包，
+    // 绝对 URL 必须原样留下。
+    const m = /<link\b[^>]*\brel=["']?icon["']?[^>]*>/i.exec(html);
+    expect(m, '产物里没有 <link rel=icon>').not.toBeNull();
+    expect(m![0]).toContain('https://sleepcloudmx.github.io/Others/Image/kenomimi.png');
+  });
+
   it('内联脚本不含顶层 import / export', () => {
     expect(/^\s*import[\s{]/m.test(inline), '内联脚本里残留 import').toBe(false);
     expect(/^\s*export[\s{]/m.test(inline), '内联脚本里残留 export').toBe(false);

@@ -18,6 +18,10 @@ export const APP_LEDE = '计算胚子练满 +20 后的得分分布，以及掉�
 export const THEME_TO_LIGHT = '切换到浅色主题';
 export const THEME_TO_DARK = '切换到深色主题';
 
+/** 源码仓库。放在标题行右侧，与主题按钮并排 */
+export const REPO_URL = 'https://github.com/SleepCloudMX/genshin-artifact';
+export const REPO_LINK = '源代码';
+
 // ---------------------------------------------------------------------------
 // 配置区
 // ---------------------------------------------------------------------------

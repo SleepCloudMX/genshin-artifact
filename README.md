@@ -4,7 +4,7 @@
 
 ## 使用
 
-https://sleeploudmx.github.io/genshin-artifact/
+https://sleepcloudmx.github.io/genshin-artifact/
 
 配置会写进 URL 查询串，可直接分享。
 
