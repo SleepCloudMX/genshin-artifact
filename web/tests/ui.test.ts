@@ -42,6 +42,20 @@ function slotAttrSelects(root: HTMLElement): HTMLSelectElement[] {
   return [...root.querySelectorAll<HTMLSelectElement>('#slotRows select[data-key="attr"]')];
 }
 
+function slotRollSelects(root: HTMLElement): HTMLSelectElement[] {
+  return [...root.querySelectorAll<HTMLSelectElement>('#slotRows select[data-key="roll"]')];
+}
+
+function stepButtons(root: HTMLElement): HTMLButtonElement[] {
+  return [...root.querySelectorAll<HTMLButtonElement>('#slotRows button[data-key="step"]')];
+}
+
+/** 第 i 行的 − / + 两个按钮 */
+function stepperOf(root: HTMLElement, i: number): { minus: HTMLButtonElement; plus: HTMLButtonElement } {
+  const btns = stepButtons(root).filter((b) => b.dataset['slot'] === String(i));
+  return { minus: btns[0]!, plus: btns[1]! };
+}
+
 function clickTab(root: HTMLElement, id: string): void {
   root.querySelector<HTMLButtonElement>(`#tab-${id}`)!.click();
 }
@@ -70,12 +84,20 @@ function setInput(el: HTMLInputElement, value: string): void {
 describe('默认配置', () => {
   beforeEach(() => resetUrl());
 
-  it('默认主词条是大攻击，副词条是暴击 / 暴伤，权重都是 1', () => {
+  it('默认主词条是大攻击，副词条是暴击 / 暴伤，权重都是 1，档位随机', () => {
     const s = defaultState();
     expect(s.mainAttr).toBe('大攻击');
-    expect(s.slots[0]).toEqual({ attr: '暴击', weight: 1 });
-    expect(s.slots[1]).toEqual({ attr: '暴伤', weight: 1 });
+    expect(s.slots[0]).toEqual({ attr: '暴击', weight: 1, initialRoll: 'random' });
+    expect(s.slots[1]).toEqual({ attr: '暴伤', weight: 1, initialRoll: 'random' });
     expect(s.initialVisible).toBe(4);
+  });
+
+  it('默认只有两条计分词条，后两行留空不计分', () => {
+    const s = defaultState();
+    expect(s.slots[2]!.attr).toBe('');
+    expect(s.slots[3]!.attr).toBe('');
+    expect(s.slots[2]!.weight).toBe(0);
+    expect(s.slots[3]!.weight).toBe(0);
   });
 
   it('默认是浅色', () => {
@@ -121,10 +143,10 @@ describe('默认配置', () => {
   });
 });
 
-describe('权重输入装在一个框里', () => {
+describe('权重：− / + 与数字框', () => {
   beforeEach(() => resetUrl());
 
-  it('每个词条只有一个权重控件，没有权重下拉', () => {
+  it('每个词条只有一个数字权重框，没有权重下拉，也没有原生上下箭头', () => {
     const root = freshRoot();
     mount(root);
     expect(root.querySelectorAll('#slotRows select[data-key="weight"]')).toHaveLength(0);
@@ -135,24 +157,241 @@ describe('权重输入装在一个框里', () => {
     }
   });
 
-  it('改权重会立刻影响结果', () => {
+  it('每行有一个 − 和一个 + 按钮，夹着数字框', () => {
+    const root = freshRoot();
+    mount(root);
+    expect(stepButtons(root)).toHaveLength(8);
+    for (let i = 0; i < 4; i++) {
+      const { minus, plus } = stepperOf(root, i);
+      expect(minus.textContent).toBe('−');
+      expect(plus.textContent).toBe('+');
+      // 同一个 stepper 容器内，顺序是 − 输入 数字 +
+      const stepper = minus.parentElement!;
+      expect(stepper).toBe(plus.parentElement);
+      expect(stepper.querySelector('input[data-key="weight"]')).not.toBeNull();
+    }
+  });
+
+  it('+ 每次加 0.1，− 每次减 0.1', () => {
+    const root = freshRoot();
+    mount(root);
+    // 注意：配置栏在每次状态变化后会重建节点，**不能缓存旧引用**，
+    // 否则读到的是已经被替换掉的那个 input（表现为「点了没反应」）
+    const read = () => slotWeightInputs(root)[0]!.value;
+    expect(read()).toBe('1');
+
+    stepperOf(root, 0).plus.click();
+    expect(read()).toBe('1.1');
+    stepperOf(root, 0).plus.click();
+    expect(read()).toBe('1.2');
+    stepperOf(root, 0).minus.click();
+    expect(read()).toBe('1.1');
+    stepperOf(root, 0).minus.click();
+    stepperOf(root, 0).minus.click();
+    expect(read()).toBe('0.9');
+  });
+
+  it('反复加减不会攒出浮点误差（不会变成 0.30000000000000004）', () => {
+    const root = freshRoot();
+    mount(root);
+    setInput(slotWeightInputs(root)[0]!, '0');
+    for (let i = 0; i < 3; i++) stepperOf(root, 0).plus.click();
+    expect(slotWeightInputs(root)[0]!.value).toBe('0.3');
+  });
+
+  it('权重为 0 时 − 不可用，+ 可把权重加回来', () => {
+    const root = freshRoot();
+    mount(root);
+    // 默认第 3、4 行是空的、权重 0
+    expect(stepperOf(root, 2).minus.disabled).toBe(true);
+    expect(stepperOf(root, 2).plus.disabled).toBe(false);
+
+    stepperOf(root, 2).plus.click();
+    expect(slotWeightInputs(root)[2]!.value).toBe('0.1');
+    expect(stepperOf(root, 2).minus.disabled).toBe(false);
+  });
+
+  it('− 不会把权重压到负数', () => {
+    const root = freshRoot();
+    mount(root);
+    setInput(slotWeightInputs(root)[0]!, '0.05');
+    // 0.05 − 0.1 应当夹到 0，而不是 −0.05
+    stepperOf(root, 0).minus.click();
+    expect(slotWeightInputs(root)[0]!.value).toBe('0');
+  });
+
+  it('点 +/− 之后结果立刻更新', () => {
     const root = freshRoot();
     mount(root);
     const readBest = () => root.querySelectorAll('#cards .card-value')[3]!.textContent!;
     const before = readBest();
-
-    const inputs = slotWeightInputs(root);
-    setInput(inputs[1]!, '2');
+    stepperOf(root, 1).plus.click();
     expect(readBest()).not.toBe(before);
+  });
+
+  it('权重框仍可直接输入任意值', () => {
+    const root = freshRoot();
+    mount(root);
+    setInput(slotWeightInputs(root)[1]!, '0.25');
+    expect(slotWeightInputs(root)[1]!.value).toBe('0.25');
+    expect(root.querySelector('.error')).toBeNull();
   });
 
   it('权重留空按 0 处理，不抛错', () => {
     const root = freshRoot();
     mount(root);
-    const inputs = slotWeightInputs(root);
-    setInput(inputs[0]!, '');
+    setInput(slotWeightInputs(root)[0]!, '');
     expect(root.querySelector('.error')).toBeNull();
     expect(root.querySelector('#scoreChart svg')).not.toBeNull();
+  });
+});
+
+describe('初始档位（第三列）', () => {
+  beforeEach(() => resetUrl());
+
+  /** 得分分布面板里的「最高可能分」卡片 */
+  function bestOf(root: HTMLElement): number {
+    const panel = root.querySelector('[data-tab="growth"]')!;
+    return Number(panel.querySelectorAll('.card-value')[3]!.textContent);
+  }
+
+  it('每行一个档位下拉，选项是「随机 + 四档」', () => {
+    const root = freshRoot();
+    mount(root);
+    const rolls = slotRollSelects(root);
+    expect(rolls).toHaveLength(4);
+    for (const sel of rolls) {
+      expect([...sel.options].map((o) => o.value)).toEqual(['random', '0', '1', '2', '3']);
+      expect(sel.value).toBe('random');
+    }
+  });
+
+  it('档位选项带数值，否则用户没法判断选哪档', () => {
+    const root = freshRoot();
+    mount(root);
+    // 第 1 行默认是暴击（成长四档 2.7 / 3.1 / 3.5 / 3.9）
+    const labels = [...slotRollSelects(root)[0]!.options].map((o) => o.textContent);
+    expect(labels[0]).toBe('随机');
+    expect(labels[1]).toBe('2.7');
+    expect(labels[4]).toBe('3.9');
+  });
+
+  it('改词条后档位标签跟着换（不同词条档位值不同）', () => {
+    const root = freshRoot();
+    mount(root);
+    setSelect(slotAttrSelects(root)[0]!, '充能');
+    const labels = [...slotRollSelects(root)[0]!.options].map((o) => o.textContent);
+    // 充能成长四档 4.5 / 5.2 / 5.8 / 6.5
+    expect(labels).toContain('4.5');
+    expect(labels).toContain('6.5');
+  });
+
+  it('固定初始档位会真的改变分布', () => {
+    const root = freshRoot();
+    mount(root);
+
+    // 注意：**最高可能分不会变**。最高分来自「每次都取顶档」，
+    // 随机分布本来就包含这条路径，固定到顶档只是把它挑出来而已。
+    // 真正会变的是达到高分线的概率。
+    setInput(root.querySelector<HTMLInputElement>('#targetScore')!, '45');
+    const probOf = () => {
+      const panel = root.querySelector('[data-tab="growth"]')!;
+      return panel.querySelectorAll('.card-value')[1]!.textContent!;
+    };
+
+    const randomP = probOf();
+    setSelect(slotRollSelects(root)[0]!, '0');
+    const lowP = probOf();
+    setSelect(slotRollSelects(root)[0]!, '3');
+    const highP = probOf();
+
+    // 三者的字符串应当互不相同，且低档的概率最小
+    expect(lowP).not.toBe(randomP);
+    expect(highP).not.toBe(randomP);
+    expect(lowP).not.toBe(highP);
+    // 低档更难上 45 分
+    const num = (s: string) => Number(s.replace('%', ''));
+    expect(num(lowP)).toBeLessThan(num(randomP));
+    expect(num(randomP)).toBeLessThan(num(highP));
+  });
+
+  it('初始档位的选择会写进状态（并影响 toSpec）', () => {
+    const s = defaultState();
+    s.slots[0]!.initialRoll = 2;
+    const { spec } = toSpec(s);
+    expect(spec.slots[0]!.initialRoll).toBe(2);
+    // 没改的槽位保持随机
+    expect(spec.slots[1]!.initialRoll).toBe('random');
+  });
+
+  it('固定档位会写进分享链接并能读回来', () => {
+    const s = defaultState();
+    s.slots[0]!.initialRoll = 2;
+    const back = fromQuery('?' + toQuery(s));
+    expect(back.slots[0]!.initialRoll).toBe(2);
+    // 老链接（只有 词条:权重 两段）回落到 random
+    const old = fromQuery(
+      '?main=大攻击&slots=' + encodeURIComponent('暴击:1,暴伤:1,:0,:0'),
+    );
+    expect(old.slots[0]!.initialRoll).toBe('random');
+  });
+});
+
+describe('配置属于任务', () => {
+  beforeEach(() => resetUrl());
+
+  it('「得分分布」的配置有初始词条数与目标分数', () => {
+    const root = freshRoot();
+    mount(root);
+    const config = root.querySelector('#config')!;
+    expect(config.querySelector('#mainAttr')).not.toBeNull();
+    expect(config.querySelector('#slotRows')).not.toBeNull();
+    expect(config.querySelector('#initialVisible')).not.toBeNull();
+    expect(config.querySelector('#targetScore')).not.toBeNull();
+  });
+
+  it('「胚子质量」的配置不含初始词条数与目标分数（它只看掉落那一刻）', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const config = root.querySelector('#config')!;
+    expect(config.querySelector('#mainAttr')).not.toBeNull();
+    expect(config.querySelector('#slotRows')).not.toBeNull();
+    expect(config.querySelector('#initialVisible')).toBeNull();
+    expect(config.querySelector('#targetScore')).toBeNull();
+    // 初始档位是「强化」才有的事，掉落那一刻用不上 → 这一列也不该出现
+    expect(config.querySelector('#slotRows select[data-key="roll"]')).toBeNull();
+  });
+
+  it('切 tab 会把左栏配置整体换掉', () => {
+    const root = freshRoot();
+    mount(root);
+    expect(root.querySelector('#initialVisible')).not.toBeNull();
+    clickTab(root, 'more');
+    expect(root.querySelector('#initialVisible')).toBeNull();
+    expect(root.querySelector('#slotRows')).toBeNull();
+    clickTab(root, 'growth');
+    expect(root.querySelector('#initialVisible')).not.toBeNull();
+  });
+
+  it('在质量页改权重，切回得分分布时结果也是新的', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    stepperOf(root, 1).plus.click();
+    clickTab(root, 'growth');
+    // 暴伤权重 1 → 1.1，最高分必然变化
+    expect(root.querySelectorAll('#cards .card-value')[3]!.textContent).not.toBe('50.7');
+  });
+
+  it('两个 tab 共用同一份评分标准（主词条 + 词条与权重）', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    setSelect(root.querySelector<HTMLSelectElement>('#mainAttr')!, '暴击');
+    clickTab(root, 'growth');
+    expect(root.querySelector<HTMLSelectElement>('#mainAttr')!.value).toBe('暴击');
+    expect(slotAttrSelects(root).map((s) => s.value)).not.toContain('暴击');
   });
 });
 
@@ -401,8 +640,8 @@ describe('状态 → 计算输入', () => {
   it('权重 > 0 的词条按固定顺序占槽位', () => {
     const { spec, scoredCount } = toSpec(defaultState());
     expect(scoredCount).toBe(2);
-    expect(spec.slots[0]).toEqual({ attr: '暴击', weight: 1 });
-    expect(spec.slots[1]).toEqual({ attr: '暴伤', weight: 1 });
+    expect(spec.slots[0]).toEqual({ attr: '暴击', weight: 1, initialRoll: 'random' });
+    expect(spec.slots[1]).toEqual({ attr: '暴伤', weight: 1, initialRoll: 'random' });
     expect(spec.slots[2]!.weight).toBe(0);
     expect(spec.slots[3]!.weight).toBe(0);
   });

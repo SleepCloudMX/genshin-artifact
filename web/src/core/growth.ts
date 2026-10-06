@@ -34,11 +34,32 @@ import { GROWTHS, UPGRADE_COUNT, type SubAttr } from './stats';
 /** 内部固定的放大倍数：分数与权重都 ×1000 */
 export const SCALE = 1000;
 
+/** 成长档位数（四档）。固定初始档位时要按它补路径数，见 `slotTables` */
+export const TIER_COUNT = 4;
+
+/**
+ * 掉落时的**初始档位**（那一次落下来的成长值取第几档）。
+ *
+ * 单独建这个类型是因为它和后续成长是两回事：掉落时的那一次是**一件胚子的既成事实**，
+ * 后续 4~5 次才是随机的。允许把它固定成某一档，就能回答
+ * 「初始最小 / 初始最大分别能到多少分」这类问题。
+ */
+export type InitialRoll = 'random' | 0 | 1 | 2 | 3;
+
+/** 初始档位的全部可选值，界面直接遍历这个数组 */
+export const INITIAL_ROLLS: readonly InitialRoll[] = ['random', 0, 1, 2, 3];
+
+export function isInitialRoll(v: unknown): v is InitialRoll {
+  return v === 'random' || v === 0 || v === 1 || v === 2 || v === 3;
+}
+
 /** 一个副词条槽位 */
 export interface Slot {
   attr: SubAttr;
   /** 计分权重。0 表示该词条已知但不计分。建议用 1 / 0.5 / 0.1 之类的小数 */
   weight: number;
+  /** 掉落时那一次成长取第几档；`'random'` 表示四档等概率 */
+  initialRoll: InitialRoll;
 }
 
 /** 掉落时可见的副词条数量 */
@@ -47,7 +68,8 @@ export type InitialVisible = 3 | 4;
 export interface ArtifactSpec {
   /**
    * 4 个副词条，**顺序有语义**（成长次数的分配不对称，不要重排）。
-   * 3 词条胚子时第 4 个是「第 1 次成长才激活」的那个，通常 weight = 0。
+   * 3 词条胚子时第 4 个是「第 1 次成长才激活」的那个，通常 weight = 0；
+   * 它也会被自动当成「掉落时不存在」，`initialRoll` 对它无意义。
    */
   slots: readonly [Slot, Slot, Slot, Slot];
   /** 掉落时可见几个副词条 */
@@ -79,43 +101,95 @@ function growthScaled(g: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// 各槽位「被成长 d 次」的 (加权得分, 序列数) 表
+// 各槽位「一共被成长 d 次」的 (加权得分, 序列数) 表
 //
 // 两个关键点：
 //   1. 先把成长值乘上槽位权重、再合并同类项（`g × w` 在整数刻度上是精确的）；
 //   2. 分数保持整数刻度，直到最后一步才取整到 0.1。
+//
+// 「一共被成长 d 次」= 掉落那一次 + 后续 (d-1) 次强化。掉落那次走**初始档位**
+// （可固定也可随机），后续每次才是四档等概率。两者是先验不同的两件事，
+// 分开算才对——早期版本把掉落那次也当成四档随机，那是简化。
 // ---------------------------------------------------------------------------
 const slotTableCache = new Map<string, number[][]>();
 
-function slotTables(attr: SubAttr, weight: number): number[][] {
-  const key = `${attr}|${weight}`;
+/** 一个槽位的四档成长值（已乘权重、整数刻度） */
+function tierValues(attr: SubAttr, weight: number): number[] {
+  return GROWTHS[attr].map((g) => growthScaled(g) * weight);
+}
+
+/** 把「(和, 权重) 表」按一个档位表再卷积一次 */
+function convolve(acc: Map<number, number>, addends: number[]): Map<number, number> {
+  const next = new Map<number, number>();
+  for (const [sum, count] of acc) {
+    for (const g of addends) next.set(sum + g, (next.get(sum + g) ?? 0) + count);
+  }
+  return next;
+}
+
+/** 把 Map 摊平成 [和, 权重, 和, 权重, …]，减少后续的元组开销 */
+function flatten(acc: Map<number, number>): number[] {
+  const flat = new Array<number>(acc.size * 2);
+  let i = 0;
+  for (const [sum, count] of acc) {
+    flat[i++] = sum;
+    flat[i++] = count;
+  }
+  return flat;
+}
+
+/**
+ * `tables[d]` = 「一共被成长 `d` 次」的 (和, 序列数) 扁平表。
+ * `tables[0]` 是「一次都没有」= 得分 0、1 条路径。
+ *
+ * ## 不变量：`tables[d]` 恒有 `4^d` 条路径
+ *
+ * 两处都靠它：
+ *   - `itemDist` 的键与 `totalOf` 的计数口径；
+ *   - 「固定初始档位」与「随机初始档位」的结果可比 —— 固定档位只改变
+ *     那一次取值的**分布**，不该改变总权重。
+ *
+ * 随机档位天然是 4 条路径（四档各一条）；**固定档位只有 1 条路径**，
+ * 所以要乘 4 补回来。不补的话，固定几个槽位，全表权重就和 total 差 4 的幂
+ * （`scoreDistribution` 的自洽性断言会直接拦住）。
+ *
+ * **3 词条胚子的第 4 个槽位也必须满足它**：那条副词条虽然是第 1 次成长才激活的，
+ * 但激活它的那一次就是它的初始档位（游戏里第 4 条一出现就带一个档位值），
+ * 所以它的第一次也是「四档随机」，不是「纯成长」。
+ */
+function slotTables(attr: SubAttr, weight: number, initialRoll: InitialRoll): number[][] {
+  const key = `${attr}|${weight}|${initialRoll}`;
   const cached = slotTableCache.get(key);
   if (cached) return cached;
 
-  const scale = SCALE;
-  // 成长值先 ×1000 成整数，再乘原始权重（0.1/0.5/1/2… 与 1000 的倍数相乘仍精确）
-  const tiers = GROWTHS[attr].map((g) => growthScaled(g) * weight);
+  const tiers = tierValues(attr, weight);
 
-  const tables: number[][] = [[0, 1]];
-  let acc = new Map<number, number>([[0, 1]]);
+  // 掉落那一次：随机 = 四档各一条路径；固定 = 一条路径 × 4（见上）
+  let acc = new Map<number, number>();
+  if (initialRoll === 'random') {
+    for (const g of tiers) acc.set(g, (acc.get(g) ?? 0) + 1);
+  } else {
+    acc.set(tiers[initialRoll]!, TIER_COUNT);
+  }
 
-  for (let d = 1; d <= UPGRADE_COUNT + 2; d++) {
-    const next = new Map<number, number>();
-    for (const [sum, count] of acc) {
-      for (const g of tiers) next.set(sum + g, (next.get(sum + g) ?? 0) + count);
-    }
-    acc = next;
-    const flat = new Array<number>(next.size * 2);
-    let i = 0;
-    for (const [sum, count] of next) {
-      flat[i++] = sum;
-      flat[i++] = count;
-    }
-    tables.push(flat);
+  const tables: number[][] = [[0, 1], flatten(acc)];
+  for (let d = 2; d <= UPGRADE_COUNT + 2; d++) {
+    acc = convolve(acc, tiers);
+    tables.push(flatten(acc));
   }
 
   slotTableCache.set(key, tables);
   return tables;
+}
+/**
+ * 某词条「成长到第 t 档」的展示文案，如 `4.1%`；带权重时显示实际计分值 `4.1`。
+ * 界面用它给初始档位的下拉选项打标签——不给数字的话用户没法判断选哪档。
+ */
+export function tierLabel(attr: SubAttr, tier: number, weight = 1): string {
+  const g = GROWTHS[attr][tier as 0 | 1 | 2 | 3];
+  if (g === undefined) return '—';
+  const scaled = growthScaled(g) * weight;
+  return `${(scaled / SCALE).toFixed(2).replace(/\.?0+$/, '')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +255,28 @@ function distinctPermutations(values: number[]): number[][] {
   return out;
 }
 
-/** 归一化常数。应与「稠密表全部权重之和」相等（`scoreDistribution` 内部会断言） */
+/**
+ * 归一化常数（= 稠密表全部权重之和）。
+ *
+ * ## 推导
+ *
+ * `itemDist` 的每个键是「4 个槽位各自一共被成长多少次」，Σd = σd（词条数 + 5）；
+ * 它的值 `freq` 是该多重集的排列数。键 `k` 贡献的权重是
+ *
+ *     freq_k × Π_v |tables[d_v]| = freq_k × Π_v 4^(d_v) = freq_k × 4^σd
+ *
+ * 而 `Σ freq_k = 4^(词条数+1)`、所有键的 σd 相同，所以
+ *
+ *     total = 4^σd × Σ freq_k = 4^(σd + 词条数 + 1)
+ *
+ * 实测量（`tools/` 侧核对）：3 词条 4^12 = 16777216，4 词条 4^14 = 268435456。
+ *
+ * **易错点**：Σd 里每个可见槽位都含掉落那一次，所以 σd 比「产生成长的次数」
+ * 大 `词条数`。曾经在这里多加过一次 `initialVisible + 1`，差 4 倍。
+ *
+ * 注意：本函数现在**只是自洽性校验用的期望值**——`scoreDistribution` 直接累加
+ * 真实权重作为 `total`，不再依赖这个公式（公式算错也不该让结果算错）。
+ */
 export function totalOf(initialVisible: InitialVisible): number {
   const dist = itemDist(initialVisible);
   let sumFreq = 0;
@@ -219,7 +314,9 @@ export function scoreDistribution(spec: ArtifactSpec): DistributionTable {
   // 产生成长的次数：4 词条胚子 5 次；3 词条胚子第 1 次用于激活第 4 条，剩 4 次
   const upgradeCount = initialVisible + 1;
   const hitBuckets = upgradeCount + 1;
-  const perSlot = slots.map((s) => slotTables(s.attr, s.weight));
+  // `itemDist` 的键是「4 个槽位各自一共被成长多少次」（Σ = 词条数 + 5），
+  // 第 4 个槽位在 3 词条胚子里也照样有「初始档位」——激活它的那次成长就是它的档位。
+  const perSlot = slots.map((s) => slotTables(s.attr, s.weight, s.initialRoll));
 
   /** 得分（十分之一分）→ (命中数 → 权重) */
   const byScore = new Map<number, Map<number, number>>();
@@ -277,11 +374,13 @@ export function scoreDistribution(spec: ArtifactSpec): DistributionTable {
     return out;
   });
 
-  const total = totalOf(initialVisible);
-  let sum = 0;
-  for (const row of hits) for (const w of row) sum += w;
-  if (sum !== total) {
-    throw new Error(`权重之和 ${sum} 不等于归一化常数 ${total}`);
+  // `total` 直接累加真实权重，**不要用公式算**：
+  // 公式（`totalOf`）只当自洽性校验的期望值，算错也不该让结果跟着错。
+  let total = 0;
+  for (const row of hits) for (const w of row) total += w;
+  const expected = totalOf(initialVisible);
+  if (total !== expected) {
+    throw new Error(`权重之和 ${total} 不等于归一化常数 ${expected}`);
   }
 
   return {

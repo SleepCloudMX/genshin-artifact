@@ -31,10 +31,12 @@ import statsFixture from '../src/core/__fixtures__/stats.json';
 
 const DEAD: SubAttr = '小防御';
 
+/** 归档固件里没有「初始档位」这个概念（它总是随机的），所以统一按 random 补齐 */
 function toSlots(slots: { name: string; weight: number }[]): Slot[] {
   return slots.map((s) => ({
     attr: (s.name === '' ? DEAD : s.name) as SubAttr,
     weight: s.weight,
+    initialRoll: 'random' as const,
   }));
 }
 

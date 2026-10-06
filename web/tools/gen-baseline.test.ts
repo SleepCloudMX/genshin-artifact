@@ -35,6 +35,9 @@ function specOf(c: (typeof CASES)[number]): ArtifactSpec {
   const slots = c.slots.map((s) => ({
     attr: (s.name === '' ? DEAD : s.name) as SubAttr,
     weight: s.weight,
+    // 基线固件是「初始档位四档等概率」下的结果；固定档位属于后续新增能力，
+    // 不进基线（否则基线会随这个先验的改动而失效）
+    initialRoll: 'random' as const,
   })) as unknown as Slot[];
   return { slots: slots as unknown as ArtifactSpec['slots'], initialVisible: c.initItems };
 }
