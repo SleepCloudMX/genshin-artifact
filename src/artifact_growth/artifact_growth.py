@@ -1,3 +1,9 @@
+"""归档：圣遗物强化得分分布（原 artifact_growth.py）
+
+逻辑已移植到 web/src/core/，本文件仅作**前端移植的验收基准**，不再维护。
+数值实现未作任何改动，仅统一了引号与空行风格。已验证正确，见
+docs/ai-output/1-refactor/01-code-review.md。
+"""
 from collections import defaultdict, Counter
 from itertools import product, permutations, accumulate
 from math import prod
@@ -12,6 +18,8 @@ from matplotlib import pyplot as plt
 
 
 plt.rcParams['font.sans-serif'] = ['SimHei']
+
+# 副词条的 4 档成长值。'' 是魔法键：表示「无效 / 不计分词条」，成长值恒为 0。
 growths = {
     '暴击': [2.7, 3.1, 3.5, 3.9],
     '暴伤': [5.4, 6.2, 7.0, 7.8],
@@ -28,6 +36,7 @@ growths = {
 
 
 class Item(NamedTuple):
+    """一个槽位。weight > 0 即计入「有效集」；name='' 表示无效词条。"""
     name: str
     weight: int | float
     init: float | None
@@ -35,6 +44,12 @@ class Item(NamedTuple):
 
 @cache
 def get_item_dist(init_items: int, init_rand: bool = True) -> dict[tuple, int]:
+    """各槽位「被成长了多少次」的多重集 → 权重。
+
+    键的 Σ = init_items + 1（3 词条胚子首次成长用于激活第 4 词条，不产生成长分）。
+    返回的是 permutations 展开后的排列，重复元组被 dict 覆盖去重，
+    因此值的和恰为 4^(init_items+1)。
+    """
     if init_items == 3:     # 增加 4 次词条
         dist_freq = {
             (4, 0, 0, 0): 1,
@@ -62,15 +77,23 @@ def get_item_dist(init_items: int, init_rand: bool = True) -> dict[tuple, int]:
 
 @cache
 def get_multi_growth(name: str) -> list:
-    return [list(Counter(sum(seq) for seq in product(growths[name], repeat=i)).items()) for i in range(7)]
+    """i 次成长（i<=6）的「成长值之和 → 序列数」合并同类项结果。权重和 = 4^i。"""
+    return [list(Counter(sum(seq) for seq in product(growths[name], repeat=i)).items())
+            for i in range(7)]
 
 
 def calc_score_dist(artifact: list[Item], init_items: int, init_rand: bool = True
                     ) -> tuple[int, list[tuple[float, list[int]]]]:
+    """返回 (归一化常数, [(得分字符串, [命中 i 次的权重])])。
+
+    dist[i] 的 i 直接等于「命中有效词条的次数」；未出现的组合填 0。
+    init_rand=False 分支不可用（Item.init 为 None 会 TypeError），仅为存档保留。
+    """
     item_dist = get_item_dist(init_items, init_rand)
     init_score = 0 if init_rand else sum(item.init * item.weight for item in artifact)
     init_times = sum(bool(item.weight) for item in artifact) if init_rand else 0
     score_dist = defaultdict(lambda: [0] * (2 + init_items))
+    # 注意：按 name 建字典，同名槽位会互相覆盖（当前用法靠 '' 值相同侥幸无事）
     multi_growths = {item.name: [[(g * item.weight, t) for g, t in line]
                                  for line in get_multi_growth(item.name)] for item in artifact}
     for dist, freq in item_dist.items():
@@ -89,7 +112,7 @@ def save2excel(name: str, total: int, score_dist,
     def disp(num: int) -> str | int | float:
         if as_str:
             if as_prob:
-                return f'{num/total:.2e}' if num else '0'
+                return f'{num / total:.2e}' if num else '0'
             return str(num)
         return num / total if as_prob else num
 
@@ -122,7 +145,7 @@ def plot_bar(name: str, total: int, score_dist) -> None:
     ax.set_ylabel('概率')
     ax.set_title(name)
     ax.legend()
-    ax.set_xticks(range(len(scores)))
+    ax.set_xticks(range(len(scores)))          # 缺陷 #9：刻度在整数位置，与 0.1 网格错位
     ax.set_xticklabels(scores, rotation=90)
     ax.grid(axis='y')
     plt.savefig(path)
@@ -173,73 +196,10 @@ def plot_cdf(name: str, total: int, score_dist) -> None:
     plt.close()
 
 
-def get_excel_png(name: str, artifact: list[Item], init_items: int = 4, init_rand: bool = True) -> None:
+def get_excel_png(name: str, artifact: list[Item], init_items: int = 4,
+                  init_rand: bool = True) -> None:
     data = calc_score_dist(artifact, init_items, init_rand)
     save2excel(name, *data)
     plot_bar(name, *data)
     plot_pmf(name, *data)
     plot_cdf(name, *data)
-
-
-def main():
-    """同时含有百分比和数值的，或有更多项的，得分结果非常多，导致柱状图看起来混乱，此时 CDF 视觉效果较好"""
-    # get_excel_png('4r-暴击-爆伤', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='暴击', weight=2, init=None),
-    #     Item(name='暴伤', weight=1, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=4, init_rand=True)
-
-    # get_excel_png('4r-暴击', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='暴击', weight=2, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=4, init_rand=True)
-
-    # get_excel_png('3r-暴击-爆伤', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='暴击', weight=2, init=None),
-    #     Item(name='暴伤', weight=1, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=3, init_rand=True)
-
-    # get_excel_png('3r-暴击', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='暴击', weight=2, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=3, init_rand=True)
-
-    # get_excel_png('4r-大生命-小生命', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='大生命', weight=1, init=None),
-    #     Item(name='小生命', weight=0.01, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=4, init_rand=True)
-
-    # get_excel_png('4r-大攻击-小攻击', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='大攻击', weight=1, init=None),
-    #     Item(name='小攻击', weight=0.1, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=4, init_rand=True)
-
-    # get_excel_png('4r-小攻击', [
-    #     # (名称, 权重, 初始值)
-    #     Item(name='小攻击', weight=1, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    #     Item(name='', weight=0, init=None),
-    # ], init_items=4, init_rand=True)
-
-
-if __name__ == '__main__':
-    from timeit import timeit
-    print(timeit(main, number=1))

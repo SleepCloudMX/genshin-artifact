@@ -1,8 +1,17 @@
+"""归档：「不同命中词条数下超过 X 分的概率」（原 better_than.py）
+
+逻辑已移植到 web/src/render/（前端直接在内存分布上切片，不再经过 xlsx）。
+本文件仅作存档，不再维护。
+
+已知问题（缺陷 #20）：从 xlsx 回读概率再重算，而 calc_score_dist 本来就在内存里
+有精确的整数权重；用格式化后的概率反推会引入舍入误差。
+"""
 from pathlib import Path
+
 import pandas as pd
 from matplotlib import pyplot as plt
 
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 'Microsoft YaHei' 可以解决指数为负时的显示问题
+plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 
@@ -18,10 +27,6 @@ def better_than(score: float, xls_path: str | Path, show: bool = False) -> None:
     bars = plt.barh(x_ticks, betters)
     plt.bar_label(bars, label_type='edge')
     plt.xlim([0, 1.2 * max(betters)])
-    # for bar, better, total in zip(bars, betters, totals):
-    #     width = bar.get_width()
-    #     y_pos = bar.get_y() +  bar.get_height() / 2
-    #     plt.text(width / 2, y_pos, f'{better} = {total}', ha='center', va='center')
     plt.title(f'{Path(xls_path).stem}: 不同命中词条下超过 {score} 分的概率 '
               f'(共 {sum(betters) * 100:.2f}%)')
     plt.xlabel('概率')
@@ -32,20 +37,3 @@ def better_than(score: float, xls_path: str | Path, show: bool = False) -> None:
     if show:
         plt.show()
     plt.close()
-
-
-def main() -> None:
-    """测试"""
-    # for score in (30, 40, 45, 50):
-    #     better_than(score, '4r-暴击-爆伤/4r-暴击-爆伤.xlsx')
-    # for score in (30, 40, 45):
-    #     better_than(score, '3r-暴击-爆伤/3r-暴击-爆伤.xlsx')
-
-    better_than(42.8, '4r-暴击-爆伤/4r-暴击-爆伤.xlsx')
-    # better_than(43.5, '3r-暴击-爆伤/3r-暴击-爆伤.xlsx')
-    # better_than(18.7, '4r-暴击/4r-暴击.xlsx')
-
-
-if __name__ == '__main__':
-    from timeit import timeit
-    print('Time used:', timeit(main, number=1))
