@@ -33,7 +33,7 @@ import {
 import { renderPie } from '../src/render/pie';
 import { heatColor, inkOf, renderHeatmap } from '../src/render/heatmap';
 import { OTHER_MAIN, nextSubstatDist, substatHeatmap } from '../src/core/heatmap';
-import { SUB_ATTRS } from '../src/core/stats';
+import { SUB_ATTRS, type SubAttr } from '../src/core/stats';
 import { Tooltip } from '../src/render/tooltip';
 import { pctTick } from '../src/ui/format';
 
@@ -952,7 +952,7 @@ describe('热力图（主词条 × 副词条）', () => {
         rows,
         cols,
         nextBars: (row, col) => {
-          const next = nextSubstatDist(row.probe, [col]);
+          const next = nextSubstatDist(row.key as SubAttr, [col as SubAttr]);
           const peak = Math.max(...next.map((d) => d.p));
           return next.map((d) => ({
             label: d.attr,
@@ -984,15 +984,15 @@ describe('热力图（主词条 × 副词条）', () => {
   });
 
   it('色标：随概率单调变深，且两端都不走极端（浅格深字 / 深格白字）', () => {
-    // 四个端点
-    expect(heatColor(0)).toBe('#f4f8fc');
-    expect(heatColor(1)).toBe('#32719f');
+    // 与「质量分布」的段共用同一条蓝色色标
+    expect(heatColor(0)).toBe(BLUE_RAMP[0]);
+    expect(heatColor(1)).toBe(BLUE_RAMP[BLUE_RAMP.length - 1]);
     const mid = heatColor(0.5);
     expect(mid).not.toBe(heatColor(0));
     expect(mid).not.toBe(heatColor(1));
-    // 中间几档偏浅：数据大多落在 7%~16%，整张图不能发闷
-    expect(luminance(heatColor(0.5))).toBeGreaterThan(0.4);
-    expect(luminance(heatColor(2 / 3))).toBeGreaterThan(0.4);
+    // 中间几档偏浅：一张表里大部分格子落在 t ≈ 0.4~0.7，整张图不能发闷
+    expect(luminance(heatColor(0.5))).toBeGreaterThan(0.45);
+    expect(luminance(heatColor(0.6))).toBeGreaterThan(0.35);
     // 单调变深（相邻两档可能被 8 位色深抹平，所以取不严格的不等，另外守住两端确实有差）
     for (let t = 0; t < 1; t += 0.1) {
       expect(luminance(heatColor(t))).toBeGreaterThanOrEqual(luminance(heatColor(t + 0.1)));

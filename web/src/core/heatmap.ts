@@ -30,11 +30,14 @@
  */
 
 import {
+  POSITIONS,
+  SLOT_NAMES,
   SUB_ATTRS,
   SUB_WEIGHTS,
   SUB_WEIGHT_SUM,
   canonicalMainAttr,
   excludedSubstat,
+  mainProbabilities,
   type MainAttr,
   type SubAttr,
 } from './stats';
@@ -43,6 +46,42 @@ export interface SubProb {
   attr: SubAttr;
   /** 概率；一行的概率之和恒为 1 */
   p: number;
+}
+
+/**
+ * 「部位 × 主词条」：已掉到该部位的前提下，这个部位出这个主词条的概率。
+ *
+ * 与副词条那张热力图是**两个不同的问题**：
+ *   - 这张问「掉下来的这件，主词条是什么」（`stats.mainProbabilities`，就是权重占比）；
+ *   - 那张问「主词条定了之后，副词条一条条抽出来是什么」。
+ * 两张都**不依赖任何配置**（部位与主词条只是表格的维度，不是输入）。
+ *
+ * 沙 / 杯 / 头 是仅有的三个「主词条可随机」的部位；花 / 羽 的主词条固定
+ * （生命值 / 攻击力，概率 1），放进来只是一行全是同一个数，所以不列。
+ */
+
+/** 列（可能成为主词条的词条），顺序取「玩家遇到的顺序」：沙 → 杯 → 头 各自新增的那些 */
+export const MAIN_ATTR_COLS: readonly string[] = [
+  '大生命', '大防御', '大攻击', '充能', '精通', // 沙
+  '物伤', '火伤', '雷伤', '岩伤', '风伤', '水伤', '冰伤', '草伤', // 杯
+  '暴击', '爆伤', '治疗', // 头
+];
+
+export interface MainAttrRow {
+  /** 部位（`沙` / `杯` / `头`） */
+  key: string;
+  label: string;
+  /** 该部位**能出**的主词条；不在里面的列就是空格子（该部位不出它） */
+  probs: { attr: string; p: number }[];
+}
+
+export function mainAttrHeatmap(): MainAttrRow[] {
+  return POSITIONS.map((pos) => ({
+    key: pos,
+    label: SLOT_NAMES[pos],
+    // 权重表只覆盖各部位可出现的主词条，所以这里不需要再过滤
+    probs: mainProbabilities(pos).map((d) => ({ attr: d.attr as string, p: d.p })),
+  }));
 }
 
 /** 「其他主词条」那一行的键（元素伤害 / 物伤 / 治疗这类只做主词条的词条） */

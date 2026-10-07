@@ -112,14 +112,19 @@ export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
-/** 「主词条 · 副词条」：该部位的主词条概率 + 给定主词条后逐条抽副词条的概率（热力图） */
+/** 「主词条 · 副词条」：部位 × 主词条、主词条 × 副词条两张概率表（都与配置无关） */
 export const SUB_MAIN_SUB = '主词条 · 副词条';
 
-export function mainProbTitle(slotName: string): string {
-  return `${slotName}的主词条概率`;
-}
-/** 主词条概率是**条件**概率，前提是已经掉到了这个部位（与「该部位的胚子概率」同一口径） */
-export const MAIN_PROB_HINT = '前提是已经掉到了这个部位。';
+/** 第一张：部位 × 主词条的二维概率表 */
+export const MAIN_PROB_TITLE = '各部位的主词条概率';
+/**
+ * 主词条概率是**条件**概率（前提是已经掉到了这个部位，与「该部位的胚子概率」同一口径）；
+ * 空格子是「该部位不出这个词条」，不是 0%。
+ */
+export const MAIN_PROB_HINT =
+  '已掉到该部位的前提下，出这个主词条的概率；空格子 = 该部位不出它。';
+export const MAIN_PROB_ROW_AXIS = '部位';
+export const MAIN_PROB_COL_AXIS = '主词条';
 export const HEAT_TITLE = '给定主词条的副词条概率';
 /**
  * 热力图的口径。

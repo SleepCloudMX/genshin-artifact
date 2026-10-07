@@ -11,7 +11,7 @@
 
 import type { HeatRow } from '../core/heatmap';
 import type { SubAttr } from '../core/stats';
-import { fitSize, textWidth } from './charts';
+import { fitSize, inkOn, luminance, rampColor, textWidth } from './charts';
 import type { Tooltip, TooltipBar } from './tooltip';
 
 const NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -32,70 +32,51 @@ function text(content: string, attrs: Record<string, string | number> = {}): SVG
 }
 
 /**
- * 色标：浅色 → 站内那支蓝 → 深蓝，四档之间线性插值。
+ * 色标：热力图与「质量分布」的段**共用** `charts.BLUE_RAMP`（全站就这一条蓝渐变），
+ * 只是取色的方式不同 —— 这里按「该格概率 / 全场最大概率」连续取，
+ * 那边按段在一列里的位置取（`segmentColor`）。
  *
- * 取色时**两头都不走极端**（作者对配色的老要求）：最浅的一档只是「比背景深一点」，
- * 最深的一档也不是纯深色 —— 格子里的数字要一直读得清，所以文字颜色按格的亮度翻转
- * （见 `inkOf`）。中间多插一档浅色，是因为实际数据大多落在 7%~16% 这段，
- * 只有三档的话半张表都会是中间那个偏深的蓝，整张图发闷。
+ * 格子里写深字还是白字由 `inkOn`（亮度）决定，别硬编码一个颜色。
  */
-const RAMP = ['#f4f8fc', '#cfe0ee', '#8cb8d7', '#32719f'] as const;
+export const heatColor = rampColor;
+export { luminance, inkOn as inkOf };
 
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function rgbToHex(rgb: [number, number, number]): string {
-  return `#${rgb.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
-}
-
-/** sRGB 相对亮度（0~1），用来决定格子里写深字还是白字 */
-export function luminance(hex: string): number {
-  const lin = hexToRgb(hex).map((c) => {
-    const v = c / 255;
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
-}
-
-/** `t`（0~1）处的色标颜色 */
-export function heatColor(t: number): string {
-  const x = Math.min(Math.max(t, 0), 1) * (RAMP.length - 1);
-  const i = Math.min(Math.floor(x), RAMP.length - 2);
-  const k = x - i;
-  const a = hexToRgb(RAMP[i]!);
-  const b = hexToRgb(RAMP[i + 1]!);
-  return rgbToHex([
-    a[0] + (b[0] - a[0]) * k,
-    a[1] + (b[1] - a[1]) * k,
-    a[2] + (b[2] - a[2]) * k,
-  ]);
-}
-
-/** 格子里的字：深格写白字、浅格写深字（对比度按亮度切换，别硬编码一个颜色） */
-export function inkOf(fill: string): string {
-  return luminance(fill) < 0.18 ? '#ffffff' : '#26303d';
+/**
+ * 一行：两个维度里的一个取值（主词条 / 部位），`probs` 是它在这一行上有值的格子。
+ *
+ * 两张图共用这个形状：「主词条 × 副词条」与「部位 × 主词条」——
+ * 都是**行 × 列的二维概率表**，只是维度与口径不同。
+ */
+export interface HeatRowLike {
+  /** 稳定标识（= 词条名 / 部位名 / `OTHER_MAIN`） */
+  key: string;
+  label: string;
+  /** 不在里面的列就是**空格子**（该组合不可能出现） */
+  probs: { attr: string; p: number }[];
 }
 
 export interface HeatmapOptions {
-  rows: HeatRow[];
-  /** 列（副词条），顺序即绘制顺序 */
-  cols: readonly SubAttr[];
+  rows: HeatRowLike[];
+  /** 列，顺序即绘制顺序（元素既当标识也当列名） */
+  cols: readonly string[];
   /** 当前主词条所在行的 `key`（`core/heatmap.ts` 的 `heatRowKey`）；不给就不高亮 */
   highlightRow?: string;
+  /** 同时给出这一列时，只把**那一格**框出来（「你现在选的是这一格」） */
+  highlightCol?: string;
   /**
    * 悬停某格时浮框里那组「再下一条」的横排柱。
    *
    * 概率由调用方用 core 算好（这里只管画），因为「已抽走哪几条」是模型的事。
    */
-  nextBars?: (row: HeatRow, col: SubAttr) => TooltipBar[];
+  nextBars?: (row: HeatRowLike, col: string) => TooltipBar[];
   /** 那组柱的说明：它是一组**条件分布**，条长也不是绝对概率，必须写清 */
   nextCaption?: string;
   /** 左侧竖排轴名 */
   rowAxis?: string;
   /** 底部轴名 */
   colAxis?: string;
+  /** 行数少时别把格子拉成一整块（「部位 × 主词条」只有三行） */
+  cellMaxH?: number;
   title?: string;
   host?: HTMLElement | null;
   width?: number;
@@ -129,12 +110,14 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
   if (rows.length === 0 || cols.length === 0) return svg;
 
   const cellW = plotW / cols.length;
-  const cellH = plotH / rows.length;
+  const cellH = Math.min(plotH / rows.length, opts.cellMaxH ?? Infinity);
+  // 行数少时格子不铺满，整块表竖直居中（列名仍然贴着绘图区底部）
+  const gridTop = (plotH - cellH * rows.length) / 2;
   // 色标按**实际最大值**归一：分母写死 15.79% 的话，换个配置整张图就一片浅色
   const maxP = Math.max(...rows.flatMap((r) => r.probs.map((d) => d.p)), 0);
 
   rows.forEach((row, i) => {
-    const y = i * cellH;
+    const y = gridTop + i * cellH;
     cols.forEach((col, j) => {
       const x = j * cellW;
       const p = row.probs.find((d) => d.attr === col)?.p ?? 0;
@@ -159,7 +142,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
             y: y + cellH / 2 + 3.5,
             'text-anchor': 'middle',
             class: 'hm-value',
-            fill: inkOf(fill),
+            fill: inkOn(fill),
             'data-row': row.key,
             'data-col': col,
           }),
@@ -211,16 +194,22 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
       }),
     );
 
-    // 当前主词条那一行：整体描一圈（作者一贯要求「当前这一项要看得出来」）
+    // 当前那一行 / 那一格：描一圈（作者一贯要求「当前这一项要看得出来」）
     if (row.key === opts.highlightRow) {
+      const colIdx = opts.highlightCol ? cols.indexOf(opts.highlightCol) : -1;
+      // 给了列就只框那一格（「部位 × 主词条」：你选的是这一个组合）
+      const box =
+        colIdx >= 0
+          ? { x: colIdx * cellW - 0.75, width: cellW + 1.5 }
+          : { x: -0.75, width: plotW + 1.5 };
       plot.append(
         el('rect', {
-          x: -0.75,
+          x: box.x,
           y: y + 0.75,
-          width: plotW + 1.5,
+          width: box.width,
           height: Math.max(cellH - 1.5, 1),
           rx: 3,
-          class: 'hm-row-box',
+          class: colIdx >= 0 ? 'hm-cell-box' : 'hm-row-box',
         }),
       );
     }

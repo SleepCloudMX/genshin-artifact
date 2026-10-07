@@ -113,14 +113,27 @@ a.icon-btn { text-decoration: none; }
 /* ---------- 布局 ---------- */
 .layout {
   display: grid;
-  grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
+  /* 左：任务树；中：图表；右：**这个任务的**配置。
+     右栏给足 400px（「词条 / 权重 / 初始档位」三列要放得下），不够宽时在
+     1180px 断点整体收成一栏。 */
+  grid-template-columns: 168px minmax(0, 1fr) 400px;
   gap: 20px;
   align-items: start;
 }
-@media (max-width: 1000px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
+/* 配置栏里的三列表格比别处窄一点，给词条下拉留出写字的地方 */
+.config-col .slot-head,
+.config-col .slot-row { grid-template-columns: minmax(0, 1fr) 118px 78px; }
+.config-col .slot-head.three-col,
+.config-col .slot-row.three-col { grid-template-columns: minmax(0, 1fr) 118px 26px; }
+.config-col .slot-head.two-col,
+.config-col .slot-row.two-col { grid-template-columns: minmax(0, 1fr) 118px; }
+/* 不需要配置的任务（「更多」）：整栏收掉，把宽度让给图表 */
+.layout.no-config { grid-template-columns: 168px minmax(0, 1fr); }
+@media (max-width: 1180px) {
+  .layout,
+  .layout.no-config { grid-template-columns: minmax(0, 1fr); }
 }
-@media (min-width: 1001px) {
+@media (min-width: 1181px) {
   .sticky { position: sticky; top: 16px; }
 }
 /* 结果栏是弹性列：子 tab 面板可以撑开，图就不必挤在顶部留一大片空白 */
@@ -348,30 +361,59 @@ button.ghost {
 button.ghost:hover { background: var(--bg-soft); border-color: var(--accent); }
 button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 
-/* ---------- tab ---------- */
-.tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
-  overflow-x: auto;
-}
+/* ---------- 侧边栏：任务树 ---------- */
+/* 配置是**任务的**属性，所以导航在左、图表在中间、该任务的配置在右 ——
+   三栏摆开，「这一栏配置属于谁」一目了然（作者 2026-10-07 提的版式）。 */
+.sidebar { min-width: 0; }
+.tree { display: flex; flex-direction: column; gap: 2px; }
+.tree-group { display: flex; flex-direction: column; gap: 2px; }
 .tab {
   appearance: none;
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: 9px 14px;
-  font-size: 14px;
+  padding: 8px 10px;
+  font-size: 13.5px;
   font-family: inherit;
   color: var(--text-dim);
+  text-align: left;
+  border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
-  transition: color .15s, border-color .15s;
+  transition: background .15s, color .15s;
 }
-.tab:hover { color: var(--text); }
-.tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:hover { background: var(--bg-soft); color: var(--text); }
+.tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* 当前任务的子任务列在它下面，缩进一条竖线 */
+.tree-subs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 6px 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.tree-sub {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-dim);
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.tree-sub:hover { background: var(--bg-soft); color: var(--text); }
+.tree-sub.on { color: var(--accent); font-weight: 600; }
+/* 窄屏：三栏收成一栏，任务树变成一行横条 —— 子任务交给图表上方那一排选，
+   所以这里把侧边栏里的子任务列表藏掉（同一份状态，两个入口留一个就够）。 */
+@media (max-width: 1180px) {
+  .sidebar .tree { flex-direction: row; flex-wrap: wrap; }
+  .sidebar .tree-subs { display: none; }
+}
 
 .tab-blurb {
   margin: 0 0 14px;
@@ -656,8 +698,9 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .hm-row-label { fill: var(--text-dim); font-size: 10.5px; }
 .hm-row-label.on { fill: var(--accent); font-weight: 650; }
 .hm-col-label { fill: var(--text-dim); font-size: 10.5px; }
-/* 当前主词条那一行整体描一圈 */
+/* 当前那一行 / 那一格整体描一圈 */
 .hm-row-box { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.hm-cell-box { fill: none; stroke: var(--accent); stroke-width: 2; }
 .hm-legend { shape-rendering: crispEdges; }
 
 /* ---------- 表格 ---------- */

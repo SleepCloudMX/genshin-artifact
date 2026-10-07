@@ -3,9 +3,10 @@
  *
  * ## 结构
  *
- * 顶部是标题栏（标题 + 主题图标）。下面是左右两栏：
- *   - 左栏：**当前 tab 的**配置（`Tab.controls`）；
- *   - 右栏：结果，再按**子 tab** 分页——每张图一个子 tab，切换即可，不用滚动。
+ * 顶部是标题栏（标题 + 主题图标）。下面是**三栏**：
+ *   - 左：**任务树**（主任务 + 它下面的子任务）；
+ *   - 中：结果，按**子 tab** 分页——每张图一个子 tab，切换即可，不用滚动；
+ *   - 右：**这个任务的**配置（`Tab.controls`；不需要配置的任务整栏收掉）。
  *
  * ## 为什么配置按 tab 分
  *
@@ -14,6 +15,10 @@
  *   - 「胚子质量」只看掉落那一刻，问它「初始几条」没有意义。
  * 共享的只有**评分标准**（主词条 + 哪些副词条计分），换任务不该丢。
  * 详见 `ui/state.ts` 的两级类型划分。
+ *
+ * 配置放在**图表右侧**（而不是像早先那样固定在左边）是因为：配置是任务的属性，
+ * 摆到右边、与任务树分列图表两侧，「这一栏配置属于谁」一眼就能看出来（作者 2026-10-07
+ * 指出的问题：原来那版看起来像所有任务共用一套配置）。
  *
  * ## 子 tab 的刷新契约
  *
@@ -33,12 +38,17 @@ import {
   excludedSubstat,
   hasRandomMain,
   mainAttrsOf,
-  mainProbabilities,
   type MainAttr,
   type Slot as ArtifactSlot,
   type SubAttr,
 } from '../core/stats';
-import { heatRowKey, nextSubstatDist, substatHeatmap } from '../core/heatmap';
+import {
+  MAIN_ATTR_COLS,
+  heatRowKey,
+  mainAttrHeatmap,
+  nextSubstatDist,
+  substatHeatmap,
+} from '../core/heatmap';
 import {
   BUCKET_OPTIONS,
   bucketize,
@@ -286,15 +296,31 @@ function fillRollOptions(
 interface TabCtx {
   patch(next: Partial<AppState>): void;
   tooltip: Tooltip;
+  /** 子 tab 建好后登记进来：侧边栏要按任务列出「任务 → 子任务」 */
+  reportSubs?(api: SubsApi): void;
+  /** 当前子 tab 变了 → 让侧边栏重画高亮 */
+  navChanged(): void;
+}
+
+/** 一个任务的子 tab 导航（侧边栏与图上那一排共用同一份状态） */
+interface SubsApi {
+  labels: string[];
+  index(): number;
+  select(i: number): void;
 }
 
 interface Tab {
   id: string;
   label: string;
   blurb: string;
-  /** 左栏：这个任务需要什么配置 */
-  controls(host: HTMLElement, ctx: TabCtx): void;
-  /** 右栏：结果区骨架，首次进入时调用一次 */
+  /**
+   * 左栏……不，是**右栏**：这个任务需要什么配置。
+   *
+   * **省略 = 这个任务不需要配置**（如「更多」），那一栏整栏收掉。
+   * 配置是任务的属性，所以它跟着任务走，而不是一组全局控件。
+   */
+  controls?(host: HTMLElement, ctx: TabCtx): void;
+  /** 结果区骨架，首次进入时调用一次 */
   mount(host: HTMLElement, ctx: TabCtx): void;
   /** 配置栏同步（不重建节点，避免夺走输入焦点） */
   syncControls?(): void;
@@ -336,21 +362,29 @@ export function mount(root: HTMLElement): void {
   hero.append(titleRow, node('p', { class: 'lede' }, C.APP_LEDE));
   root.append(hero);
 
-  // ---- 两栏 ----
+  // ---- 三栏：任务树 / 图表 / 这个任务的配置 ----
   const layout = node('div', { class: 'layout' });
-  const configHost = node('div', { class: 'config-col', id: 'config' });
+  const sidebar = node('aside', { class: 'sidebar' });
+  const tree = node('nav', { class: 'tree', 'aria-label': '任务' });
+  sidebar.append(tree);
   const results = node('main', { class: 'results' });
-  const tabBar = node('div', { class: 'tabs', role: 'tablist' });
-  const tabButtons = new Map<string, HTMLButtonElement>();
   const panelHost = node('div', { class: 'tab-panels', id: 'tabPanels' });
-  results.append(tabBar, panelHost);
-  layout.append(configHost, results);
+  const configHost = node('aside', { class: 'config-col', id: 'config' });
+  results.append(panelHost);
+  layout.append(sidebar, results, configHost);
 
   const tooltipHost = node('div', { class: 'tooltip-host' });
   root.append(layout, tooltipHost);
   const tooltip = new Tooltip(tooltipHost);
 
-  const ctx: TabCtx = { patch: (next) => setState(next), tooltip };
+  /** 各任务的子 tab 导航（`Tab.mount` 时登记进来，见 `SubsApi`） */
+  const subsOf = new Map<string, SubsApi>();
+
+  const ctx: TabCtx = {
+    patch: (next) => setState(next),
+    tooltip,
+    navChanged: () => renderTree(),
+  };
 
   // -------------------------------------------------------------------------
   // 共享控件
@@ -1224,7 +1258,7 @@ export function mount(root: HTMLElement): void {
         },
       ];
 
-      const sub = mountSubTabs(bar, panels, subs);
+      const sub = mountSubTabs(bar, panels, subs, tabCtx);
       host.append(bar, panels);
 
       this.update = () => {
@@ -1497,43 +1531,41 @@ export function mount(root: HTMLElement): void {
         },
         {
           /**
-           * 「主词条 · 副词条」：**掉落是怎么抽出来的**。
+           * 「主词条 · 副词条」：**掉落是怎么抽出来的**。两张二维概率表，都与配置无关 ——
+           * 部位 / 主词条在这里是表格的维度，不是你填的输入。
            *
-           * 上半张 = 该部位的主词条概率（已经掉到该部位的前提下）；
-           * 下半张 = 参考 `主词条-副词条.png` 的热力图，行是主词条、列是副词条，
-           * 格子里是「下一条副词条是该词条」的概率（热力图那套逐条抽取的口径，
-           * 不是「词条概率」子 tab 的「4 条里含有它」——两者数值差好几倍）。
+           * 第一张：部位（纵）× 主词条（横），格 = P(该部位出该主词条)；
+           * 第二张：主词条（纵）× 副词条（横），格 = 「下一条副词条是该词条」的概率
+           * （热力图那套逐条抽取的口径，不是「词条概率」子 tab 的「4 条里含有它」）。
            *
-           * 悬停某格给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
+           * 第二张悬停某格会给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
            */
           label: C.SUB_MAIN_SUB,
           render(box) {
-            // ① 该部位的主词条概率：当前那一条挑出来上色
-            // 花 / 羽 的主词条固定（概率 1），没有主词条概率表，单独给一根 100% 的柱子
-            const slot = state.slot;
-            const fixed = !hasRandomMain(slot);
-            const probs = hasRandomMain(slot)
-              ? mainProbabilities(slot).sort((a, b) => b.p - a.p)
-              : [{ attr: mainAttrsOf(slot)[0]!, p: 1 }];
-            const current = probs.findIndex((d) => d.attr === state.mainAttr);
-            const p1 = panel(C.mainProbTitle(SLOT_NAMES[state.slot]), C.MAIN_PROB_HINT);
+            // ① 部位 × 主词条：行是沙 / 杯 / 头，列是所有能当主词条的词条
+            const p1 = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
             p1.box.classList.add('flush');
             const chart1 = node('div', { class: 'chart-wrap', id: 'mainProbChart' });
             p1.body.append(chart1);
             box.append(p1.box);
             chart1.append(
-              renderHistogram({
-                items: probs.map((d) => ({ label: d.attr, value: d.p, color: categoricalColor(0) })),
-                ...(!fixed && current >= 0 ? { highlight: current } : {}),
-                // 纵轴贴着最高的柱子：这些概率大多在 20% 上下，按整齐上限会抬到 30%，
-                // 柱子上方空一大截（作者对质量分布提过同一条）
-                tight: true,
+              renderHeatmap({
+                rows: mainAttrHeatmap(),
+                cols: MAIN_ATTR_COLS,
+                // 把「你现在选的那一格」框出来：概率与配置无关，这只是个位置提示
+                ...(hasRandomMain(state.slot)
+                  ? { highlightRow: state.slot, highlightCol: state.mainAttr }
+                  : {}),
+                rowAxis: C.MAIN_PROB_ROW_AXIS,
+                colAxis: C.MAIN_PROB_COL_AXIS,
+                // 只有三行，格子别拉成一整块
+                cellMaxH: 56,
                 host: chart1,
                 tooltip: tabCtx.tooltip,
               }),
             );
 
-            // ② 热力图
+            // ② 主词条 × 副词条
             const rows = substatHeatmap();
             const p2 = panel(C.HEAT_TITLE, C.HEAT_HINT);
             p2.box.classList.add('flush');
@@ -1549,7 +1581,7 @@ export function mount(root: HTMLElement): void {
                 // 条长按本组最大值折算（这几个概率都在 10% 上下，按原值画全是一小截），
                 // 所以 `nextCaption` 必须写明这件事。
                 nextBars: (row, col) => {
-                  const next = nextSubstatDist(row.probe, [col]);
+                  const next = nextSubstatDist(row.key as MainAttr, [col as SubAttr]);
                   const peak = Math.max(...next.map((d) => d.p));
                   return next.map((d) => ({
                     label: d.attr,
@@ -1569,7 +1601,7 @@ export function mount(root: HTMLElement): void {
         },
       ];
 
-      const sub = mountSubTabs(bar, panels, subs);
+      const sub = mountSubTabs(bar, panels, subs, tabCtx);
       host.append(bar, panels);
 
       this.update = () => {
@@ -1612,11 +1644,7 @@ export function mount(root: HTMLElement): void {
     id: 'more',
     label: C.TAB_MORE,
     blurb: '',
-    controls(host) {
-      const box = node('div', { class: 'panel sticky' });
-      box.append(panelHead(C.CONFIG, [resetBtn]), node('p', { class: 'hint' }, '此页暂无内容。'));
-      host.append(box);
-    },
+    // **不需要配置**：侧边栏这一页右边那一栏会整栏收掉（`selectTab` 里判断）
     mount(host) {
       const p = panel(C.MORE_TITLE);
       const list = node('ul', { class: 'todo' });
@@ -1636,6 +1664,7 @@ export function mount(root: HTMLElement): void {
     bar: HTMLElement,
     panels: HTMLElement,
     subs: SubTab[],
+    tabCtx: TabCtx,
   ): { refresh(): void; select(i: number): void } {
     const buttons: HTMLButtonElement[] = [];
     const holders: HTMLElement[] = [];
@@ -1667,6 +1696,8 @@ export function mount(root: HTMLElement): void {
       holders.forEach((h, k) => {
         h.hidden = k !== i;
       });
+      // 侧边栏里同一份导航要跟着高亮
+      tabCtx.navChanged();
       // 新露出来的那张图还是空的（或上一次的内容），必须重渲染
       render();
     }
@@ -1679,6 +1710,13 @@ export function mount(root: HTMLElement): void {
       sub.render(holder);
     }
 
+    // 登记给侧边栏：它与图表上方那一排是同一份状态
+    tabCtx.reportSubs?.({
+      labels: subs.map((s) => s.label),
+      index: () => active,
+      select,
+    });
+
     return { refresh: render, select };
   }
 
@@ -1689,56 +1727,67 @@ export function mount(root: HTMLElement): void {
   const TABS: Tab[] = [growthTab, qualityTab, moreTab];
   const TAB_IMPL: Record<string, Tab> = Object.fromEntries(TABS.map((t) => [t.id, t]));
 
-  for (const tab of TABS) {
-    const btn = node('button', {
-      type: 'button',
-      class: 'tab',
-      role: 'tab',
-      id: `tab-${tab.id}`,
-      'aria-controls': `panel-${tab.id}`,
-    });
-    btn.textContent = tab.label;
-    btn.addEventListener('click', () => selectTab(tab.id, true));
-    tabButtons.set(tab.id, btn);
-    tabBar.append(btn);
-  }
-
-  const mountedTabs = new Set<string>();
   const staleTabs = new Set<string>();
+
+  /**
+   * 侧边栏的任务树：主任务 + **当前任务**的子任务。
+   *
+   * 子任务只在它是当前任务时才列出来（手风琴）：一屏里同时铺开四个任务的二十个子项
+   * 反而找不到自己在哪。窄屏时子任务整段隐藏，由图表上方那一排负责切换
+   * （见 `styles.css` 的 1180px 断点）。
+   */
+  function renderTree(): void {
+    tree.replaceChildren();
+    for (const tab of TABS) {
+      const group = node('div', { class: 'tree-group' });
+      const btn = node('button', {
+        type: 'button',
+        class: tab.id === activeTab ? 'tab on' : 'tab',
+        role: 'tab',
+        id: `tab-${tab.id}`,
+        'aria-controls': `panel-${tab.id}`,
+        'aria-selected': tab.id === activeTab ? 'true' : 'false',
+      });
+      btn.textContent = tab.label;
+      btn.addEventListener('click', () => selectTab(tab.id, true));
+      group.append(btn);
+
+      const api = subsOf.get(tab.id);
+      if (api && tab.id === activeTab) {
+        const list = node('div', { class: 'tree-subs' });
+        api.labels.forEach((label, i) => {
+          const sub = node('button', {
+            type: 'button',
+            class: i === api.index() ? 'tree-sub on' : 'tree-sub',
+            'aria-current': i === api.index() ? 'true' : 'false',
+          });
+          sub.textContent = label;
+          sub.addEventListener('click', () => api.select(i));
+          list.append(sub);
+        });
+        group.append(list);
+      }
+      tree.append(group);
+    }
+  }
 
   function selectTab(id: string, writeHash: boolean): void {
     const tab = TAB_IMPL[id] ?? growthTab;
     activeTab = tab.id;
 
-    for (const [key, btn] of tabButtons) {
-      const on = key === tab.id;
-      btn.classList.toggle('on', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    }
-
-    // 配置栏整体换掉：每个任务的配置本来就不一样
+    // 配置属于任务：这一栏整体换成当前任务的；**不需要配置的任务整栏收掉**
     configHost.replaceChildren();
-    tab.controls(configHost, ctx);
+    configHost.hidden = tab.controls === undefined;
+    layout.classList.toggle('no-config', tab.controls === undefined);
+    tab.controls?.(configHost, ctx);
 
     // 结果面板只挂载一次，之后靠 `hidden` 切换。
     // 不能「切走就 removeChild」：各 tab 的 update 闭包捕获的是自己那批节点。
     for (const p of panelHost.children) {
       (p as HTMLElement).hidden = p.getAttribute('data-tab') !== tab.id;
     }
-    if (!mountedTabs.has(tab.id)) {
-      const p = node('section', {
-        class: 'tab-panel',
-        id: `panel-${tab.id}`,
-        role: 'tabpanel',
-        'aria-labelledby': `tab-${tab.id}`,
-        'data-tab': tab.id,
-      });
-      if (tab.blurb) p.append(node('p', { class: 'tab-blurb' }, tab.blurb));
-      panelHost.append(p);
-      tab.mount(p, ctx);
-      mountedTabs.add(tab.id);
-    }
 
+    renderTree();
     tooltip.hide();
     staleTabs.delete(tab.id);
     tab.syncControls?.();
@@ -1752,13 +1801,41 @@ export function mount(root: HTMLElement): void {
 
   /** 只刷新当前 tab，其余记为过期（切回去时 `selectTab` 会重算） */
   function refreshActiveTab(): void {
-    for (const id of mountedTabs) if (id !== activeTab) staleTabs.add(id);
+    for (const p of panelHost.children) {
+      const id = p.getAttribute('data-tab');
+      if (id && id !== activeTab) staleTabs.add(id);
+    }
     if (!staleTabs.has(activeTab)) TAB_IMPL[activeTab]?.update?.();
   }
 
   function readTabFromHash(): string {
     const id = location.hash.replace(/^#/, '');
     return TAB_IMPL[id] ? id : 'growth';
+  }
+
+  /**
+   * 先把**所有**任务的结果骨架挂好（只建 DOM，不画图、不计算）。
+   *
+   * 两个原因：
+   *   1. 侧边栏要列出当前任务的子任务，而子任务清单是 `mount()` 里登记的；
+   *   2. 各 tab 的 `update` 闭包捕获的是自己那批节点 —— 面板必须一直留着，
+   *      之后只靠 `hidden` 切换，绝不能「切走就 replaceChildren」。
+   *
+   * 骨架是纯 DOM 操作（卡片、子 tab 按钮、空面板），不触发任何渲染：
+   * 图表由各自的 `update()` → `sub.refresh()` 画。
+   */
+  for (const tab of TABS) {
+    const panel = node('section', {
+      class: 'tab-panel',
+      id: `panel-${tab.id}`,
+      role: 'tabpanel',
+      'aria-labelledby': `tab-${tab.id}`,
+      'data-tab': tab.id,
+    });
+    if (tab.blurb) panel.append(node('p', { class: 'tab-blurb' }, tab.blurb));
+    panel.hidden = true;
+    panelHost.append(panel);
+    tab.mount(panel, { ...ctx, reportSubs: (api) => subsOf.set(tab.id, api) });
   }
 
   activeTab = readTabFromHash();
