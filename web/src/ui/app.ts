@@ -1689,9 +1689,10 @@ export function mount(root: HTMLElement): void {
                   upper: MAIN_PROB_AXIS,
                   // 贴着峰值定上限（见 `MAIN_PROB_AXIS`）：给最高那根的柱顶标号留出空间
                   tight: true,
+                  // 画布压得扁，图内边距收窄一档，绘图区才有高度（只这一页开）
+                  compact: true,
                   width: chartWidth(wrap),
-                  // 压扁：块高从 230 收到 168（作者 2026-10-08：整页不要滚动条）。
-                  // 画布矮了但**绘图区没矮多少** —— `renderHistogram` 的上下边距同时收紧了
+                  // 压扁：块高从 230 收到 168（作者 2026-10-08：整页不要滚动条）
                   height: 168,
                   host: wrap,
                   tooltip: tabCtx.tooltip,
@@ -1732,6 +1733,7 @@ export function mount(root: HTMLElement): void {
                   dimmedLabel: C.MAIN_STAT_TAG,
                   title: C.weightsChartTitle(excluded),
                   upper: WEIGHT_AXIS,
+                  compact: true,
                   width: chartWidth(chart),
                   height: 176,
                   host: chart,

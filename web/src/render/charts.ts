@@ -763,6 +763,14 @@ export interface HistogramOptions {
    * 默认仍是 `niceAxis`（命中次数那张图不动）。
    */
   tight?: boolean;
+  /**
+   * 图内上下边距**收窄一档**（图内标题 40 → 26、横轴标号 48 → 40）。
+   *
+   * 给「词条权重」那几张用：它们的画布被压得很扁（那一页要求整页不滚动），
+   * 边距按默认给的话绘图区就没高度了。**只在这几张上开**，
+   * 别把它当默认值 —— 其它页面的留白是作者定的，不要顺手改。
+   */
+  compact?: boolean;
   host?: HTMLElement | null;
   width?: number;
   height?: number;
@@ -773,15 +781,15 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   const { items, title, tooltip } = opts;
   const format = opts.format ?? ((v: number) => pct(v, 2));
   const inside = opts.insideLabels;
+  const compact = opts.compact ?? false;
   const fit = fitSize(opts.host, { ratio: 0.30, minH: 260, maxH: 420 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
   const f = frame({
     width,
     height,
-    // 上下边距按「图内标题占 26、横轴标号占 40」给：再宽只是白边，
-    // 而画布本身常常被压扁（「词条权重」那几张），边距一大绘图区就没高度了
-    margin: { top: 26, right: 18, bottom: 40, left: 52 },
+    // 上下边距按「图内标题占 40、横轴标号占 48」给（`compact` 时收窄一档）
+    margin: { top: compact ? 26 : 40, right: 18, bottom: compact ? 40 : 48, left: 52 },
     title,
     ...(opts.tone ? { titleChip: `var(${opts.tone})` } : {}),
     ariaLabel: title ?? '分布',

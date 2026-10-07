@@ -90,10 +90,10 @@ html, body {
 /* 整页**贴着窗口两边**（作者 2026-10-07：左目录靠左、右配置靠右，宽度让给中间的图）。
    早先是 `max-width: 1400px` 居中 + 22px 内边距，宽屏上左右各白扔一大条；
    留 12px 只是为了不让圆角高亮和面板边框真的顶到窗口边缘。 */
-#app { max-width: none; margin: 0; padding: 18px 12px 20px; }
+#app { max-width: none; margin: 0; padding: 22px 12px 72px; }
 
 /* ---------- 头部 ---------- */
-.hero { margin-bottom: 12px; }
+.hero { margin-bottom: 20px; }
 .title-row {
   display: flex;
   align-items: center;
@@ -119,8 +119,8 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   color: var(--text-dim);
   background: var(--bg-elev);
@@ -166,13 +166,11 @@ a.icon-btn { text-decoration: none; }
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  /* 内边距收紧一档（作者 2026-10-08：整页不要滚动条）——
-     面板本身是留白，图才是内容 */
-  padding: 12px 16px 10px;
-  margin-bottom: 10px;
+  padding: 16px 18px 18px;
+  margin-bottom: 16px;
   box-shadow: var(--shadow);
 }
-.panel h2 { margin: 0 0 2px; font-size: 15px; font-weight: 650; letter-spacing: .2px; }
+.panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 650; letter-spacing: .2px; }
 /* 面板标题行：标题在左，操作在右 */
 .panel-head {
   display: flex;
@@ -357,7 +355,7 @@ button.ghost.add-row:disabled:hover { background: var(--bg-elev); }
 
 .slot-row select { padding: 7px 6px; font-size: 13px; }
 
-.hint { font-size: 12.5px; color: var(--text-dim); margin: 2px 0 6px; }
+.hint { font-size: 12.5px; color: var(--text-dim); margin: 4px 0 10px; }
 .hint.warn { color: var(--warn); margin: 2px 0 6px; }
 .hint.err { color: var(--err); margin: 2px 0 6px; }
 .hint:empty { display: none; }
@@ -444,10 +442,9 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
    靠左（作者 2026-10-07：放在左上角，不要中上方），比站点名大 —— 它才是这一页的标题；
    窄屏侧边栏收成横条时，它也是唯一的位置提示。 */
 .tab-title {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   text-align: left;
   font-size: 19px;
-  line-height: 1.3;
   font-weight: 650;
   letter-spacing: .3px;
   color: var(--text);
@@ -455,12 +452,17 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 
 .tab-panel[hidden] { display: none; }
 
+/* 「词条权重」那一页要求**整页不滚动**（作者 2026-10-08）：只收紧**这一页**的面板留白，
+   不动 `.panel` / `.hint` 的默认值 —— 其它页面的留白是作者定的，别顺手改全局。 */
+.tab-panel[data-tab='basic'] .panel { margin-bottom: 10px; }
+.tab-panel[data-tab='basic'] .panel .hint { margin: 2px 0 6px; }
+
 /* ---------- 子 tab（一张图一页，避免上下滚动） ---------- */
 .subtabs {
   display: inline-flex;
   gap: 2px;
-  padding: 2px;
-  margin-bottom: 10px;
+  padding: 3px;
+  margin-bottom: 14px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -471,7 +473,7 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
   appearance: none;
   border: 0;
   background: none;
-  padding: 5px 12px;
+  padding: 6px 13px;
   font-size: 13px;
   font-family: inherit;
   color: var(--text-dim);
