@@ -473,13 +473,17 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }
 
 /* 质量分布：柱内标注 + 累计概率曲线 + 勾选高亮 */
-.seg-label { fill: #fff; font-size: 9.5px; font-weight: 600; }
-.seg-pct { fill: rgb(255 255 255 / 82%); font-size: 9px; font-family: var(--mono); }
-/* 勾选的词条：命中的段留着原色并描一圈橙色（参考图的高亮色），其余压暗。
-   压暗比「把命中段换个颜色」更能看出「哪些段属于它」，也不会毁掉段色这套编码。
-   描边用橙色，是因为它在 10 个段色上都看得见，而且段色盘里刻意没有橙色系。 */
+/* 段色是浅色（见 charts.CATEGORICAL_COLORS），所以段内文字用深色 —— 浅底上白字看不清，
+   参考图（matplotlib 那几张）也是深字。 */
+.seg-label { fill: #26303d; font-size: 9.5px; font-weight: 600; }
+.seg-pct { fill: rgb(38 48 61 / 78%); font-size: 9px; font-family: var(--mono); }
+/* 段之间的细缝：浅色相邻时靠它分界，最上面那一段在纯白底上也有轮廓 */
+.bar-seg.quality-seg { stroke: var(--bg-elev); stroke-width: 1; }
+/* 勾选的词条：命中的段描一圈，其余压暗 —— 压暗比「给命中段换个颜色」更清楚，
+   也不会把段色这套编码毁掉。描边用文字色：浅底上深描边、深色主题下浅描边，
+   两种主题都看得见，也不必再从色盘里躲开某个颜色。 */
 .bar-seg.seg-dim, .seg-label.seg-dim, .seg-pct.seg-dim { opacity: .2; }
-.bar-seg.seg-hit { stroke: #ff8c00; stroke-width: 2; }
+.bar-seg.seg-hit { stroke: var(--text); stroke-width: 1.8; }
 .cum-line { fill: none; stroke: #e74c3c; stroke-width: 2; }
 .cum-dot { fill: #e74c3c; }
 .cum-guide { stroke: #e74c3c; stroke-width: .6; stroke-dasharray: 3 4; opacity: .3; }

@@ -765,31 +765,36 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 // ---------------------------------------------------------------------------
 
 /**
- * 段色盘：**只用来区分同一根柱子里的段**。
+ * 分类色盘：**柔和的浅色**，与参考图（`docs/ai-ref/v1/init_stats/` 下那几张
+ * matplotlib 图）同一路的 pastel 观感。
  *
- * 相邻两项刻意选得远（蓝→红→绿→紫……），这样一根柱子从上到下都分得清；
- * 跨柱子**不表示任何含义** —— 同一根柱子里第 k 段永远是同一个颜色，
- * 换个分数就换了组合，颜色不跟着走。作者明确说了「不同列的柱子不需要区分度」，
- * 参考实现也是这么画的（只是它按概率排序取色，我们按堆叠顺序，更稳）。
+ * 两处用它：**质量分布的段**（同一根柱子里的第 k 段取第 k 个色）与**组合概率的扇区**
+ * （按画图顺序取色）。作者对配色的要求是两头都不能过：
+ *   - 全一个颜色不行 —— 段与段的界限只能靠一条细缝看；
+ *   - 拉满对比也不行 —— 一根柱子上四五个高饱和色摞起来像色卡（原话「丑不啦唧」）。
+ * 所以这里统一取**低饱和、同一亮度档**的浅色：相邻两项换色相（蓝→橙红→青绿→淡紫……），
+ * 读得出区别，整体又是同一套调子。
  *
- * 不含橙色系：高亮描边用的是 `#ff8c00`，段色里再出现橙黄就跟它撞了。
- * 全是中深色，段内白字在任何一段上都读得清。
+ * 随之而来的两条约定：
+ *   - 段内文字用**深色**（浅底上白字看不清）—— 参考图也是深字；
+ *   - 段之间留一道**背景色的细缝**（`quality-seg`），浅色相邻时靠这条缝分界，
+ *     最上面那一段在纯白底上也有轮廓。
  */
-export const SEGMENT_COLORS = [
-  '#2563eb', // 蓝
-  '#dc2626', // 红
-  '#059669', // 绿
-  '#7c3aed', // 紫
-  '#0891b2', // 青
-  '#db2777', // 品红
-  '#65a30d', // 黄绿
-  '#4f46e5', // 靛
-  '#0d9488', // 蓝绿
-  '#475569', // 石板灰
+export const CATEGORICAL_COLORS = [
+  '#8cb8d7', // 蓝
+  '#fb8c80', // 橙红
+  '#98d7cc', // 青绿
+  '#c4c0dd', // 淡紫
+  '#f0c674', // 橙黄
+  '#98e7aa', // 绿
+  '#f2a8dc', // 粉
+  '#c9c9c9', // 灰
+  '#e1c1a5', // 米
+  '#a8c8e8', // 淡蓝
 ];
 
-export function segmentColor(index: number): string {
-  return SEGMENT_COLORS[index % SEGMENT_COLORS.length]!;
+export function categoricalColor(index: number): string {
+  return CATEGORICAL_COLORS[index % CATEGORICAL_COLORS.length]!;
 }
 
 /** 累计概率曲线（红线）的颜色。CSS 里也有一份，浮框的色块要与线一致 */
@@ -899,7 +904,7 @@ export interface QualityChartOptions {
  * ## 堆叠顺序与配色
  *
  * 段按**组合里的有效词条条数**从少到多堆（0 条在最下、4 条在最上），同档内按概率降序。
- * 颜色按**堆叠顺序**取 `SEGMENT_COLORS`：同一根柱子里的段必定不同色，
+ * 颜色按**堆叠顺序**取 `CATEGORICAL_COLORS`：同一根柱子里的段必定不同色，
  * 而跨柱子不复用同一套编码（作者要的就是这个：柱内要分得清，列间不必一致）。
  *
  * ## 标注
@@ -1005,7 +1010,7 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
       if (s.p <= 0) continue;
       const y0 = yOf(bottom + s.p);
       const h = yOf(bottom) - y0;
-      const color = segmentColor(k);
+      const color = categoricalColor(k);
       colorOf.set(s, color);
       const rect = el('rect', {
         x: x - barW / 2,
@@ -1013,7 +1018,8 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
         width: barW,
         height: Math.max(h, 0.6),
         fill: color,
-        class: 'bar-seg',
+        // `quality-seg`：段之间留一道背景色细缝，浅色相邻时靠它分界
+        class: 'bar-seg quality-seg',
       });
       // 勾选框的命中段：描边挑出来，其余压暗。压暗比「换个颜色」更能看清
       // 「哪些段属于它」，而且不会把段色这套编码毁掉。
@@ -1162,7 +1168,7 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
         .map((s) => ({
           label: s.label,
           value: pct(s.p, 2),
-          color: colorOf.get(s) ?? segmentColor(0),
+          color: colorOf.get(s) ?? categoricalColor(0),
         }));
       // 累计概率：曲线本身读不出具体数值，作者要求标在浮框里
       if (showCum) {

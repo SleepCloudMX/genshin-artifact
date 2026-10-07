@@ -16,7 +16,8 @@ import {
   type SurvivalChartOptions,
   renderHistogram,
   hitColor,
-  segmentColor,
+  categoricalColor,
+  CATEGORICAL_COLORS,
   textWidth,
   wrapCombo,
   niceAxis,
@@ -496,12 +497,12 @@ describe('质量分布', () => {
     expect(fills).toHaveLength(6);
     // 每根柱子从第 0 号色开始：一根段、三段、一根段、一根段
     expect(fills).toEqual([
-      segmentColor(0),
-      segmentColor(0),
-      segmentColor(1),
-      segmentColor(2),
-      segmentColor(0),
-      segmentColor(0),
+      categoricalColor(0),
+      categoricalColor(0),
+      categoricalColor(1),
+      categoricalColor(2),
+      categoricalColor(0),
+      categoricalColor(0),
     ]);
     // 跨柱子不复用同一套编码：同一个颜色在两根柱子里都出现了（作者说不需要区分）
     expect(new Set(fills).size).toBeLessThan(fills.length);
@@ -713,6 +714,31 @@ describe('质量分布', () => {
   it('空数据不抛错', () => {
     const svg = renderQualityStacked({ bars: [], tooltip: makeTooltip() });
     expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(0);
+  });
+});
+
+describe('分类色盘（质量分布的段 + 组合概率的扇区）', () => {
+  /** sRGB 相对亮度，用来挡住「又一版拉满对比」 */
+  function luminance(hex: string): number {
+    const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const lin = v.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
+  }
+
+  it('全是浅色（亮度 ≥ 0.35）—— 作者退回过「对比拉满拉到爆」那一版', () => {
+    // 旧版是高饱和深色（`#2563eb` 亮度 0.15、`#dc2626` 0.17），全在这条线以下
+    for (const c of CATEGORICAL_COLORS) {
+      expect(luminance(c), `${c} 太深了`).toBeGreaterThan(0.35);
+      expect(luminance(c), `${c} 太白，段界会看不出来`).toBeLessThan(0.75);
+    }
+  });
+
+  it('相邻两项换色相，一个柱子里的前 4 段互不相同', () => {
+    const head = CATEGORICAL_COLORS.slice(0, 4);
+    expect(new Set(head).size).toBe(4);
+    for (let i = 1; i < CATEGORICAL_COLORS.length; i++) {
+      expect(CATEGORICAL_COLORS[i]).not.toBe(CATEGORICAL_COLORS[i - 1]);
+    }
   });
 });
 
