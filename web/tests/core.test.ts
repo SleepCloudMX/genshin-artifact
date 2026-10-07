@@ -19,7 +19,6 @@ import {
   hasRandomMain,
   mainAttrsOf,
   mainProbAt,
-  mainSlotsOf,
   mainWeightAt,
   mainWeightSum,
   type MainAttr,
@@ -465,21 +464,6 @@ describe('部位与主词条', () => {
     }
     // 这个部位出不来的词条没有权重
     expect(mainWeightAt('沙', '火伤')).toBeUndefined();
-  });
-
-  it('mainSlotsOf：能当哪些部位的主词条（小防御一个都不能）', () => {
-    // 花 / 羽 的主词条是固定的那一条
-    expect(mainSlotsOf('小生命')).toEqual(['花']);
-    expect(mainSlotsOf('小攻击')).toEqual(['羽']);
-    // 沙 / 杯 / 头 各自专属的几条
-    expect(mainSlotsOf('充能')).toEqual(['沙']);
-    expect(mainSlotsOf('暴击')).toEqual(['头']);
-    expect(mainSlotsOf('治疗')).toEqual(['头']);
-    expect(mainSlotsOf('爆伤')).toEqual(['头']); // 别名也算同一条
-    // 三处都能出的
-    expect(mainSlotsOf('大攻击')).toEqual(['沙', '杯', '头']);
-    // **小防御只能当副词条** —— 它在副词条池里，但哪一件的主词条都不是它
-    expect(mainSlotsOf('小防御')).toEqual([]);
   });
 });
 

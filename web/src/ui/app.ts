@@ -32,7 +32,6 @@
  */
 
 import {
-  FIXED_MAIN,
   POSITIONS,
   SLOTS,
   SLOT_NAMES,
@@ -44,7 +43,6 @@ import {
   excludedSubstat,
   mainAttrsOf,
   mainProbabilities,
-  mainSlotsOf,
   mainWeightAt,
   mainWeightSum,
   type MainAttr,
@@ -1730,23 +1728,16 @@ export function mount(root: HTMLElement): void {
                   height: 260,
                   host: chart,
                   tooltip: tabCtx.tooltip,
-                  // 图上读不到的：这个数是怎么来的（分子 / 分母），以及它能不能当主词条。
-                  // **只两行**：选了主词条之后不额外加行，只把第二行的分母换成当时那个
-                  // （作者 2026-10-07：「点击后不增加行，只修改第二行 “权重 150 / 1100” 的分母」）——
+                  // 图上读不到的只有一件事：这个数是怎么来的（分子 / 分母）。
+                  // **浮框总共两行**（标题那行 + 这一行）—— 作者 2026-10-07 明确要求：
+                  // 「只保留两行，点击后不增加行，只修改第二行 “权重 150 / 1100” 的分母」
+                  // （原来还挂着「主词条 ……」与「当前口径 ……」两行，都删了）。
                   // 分母就是这一根实际用的那个，所以「分子 ÷ 分母」恒等于柱顶那个数。
                   tooltipRows: (i) => {
                     const d = data[i]!;
-                    const denom = SUB_WEIGHT_SUM - (excluded && !d.excluded ? SUB_WEIGHTS[excluded] : 0);
-                    return [
-                      { label: C.TT_WEIGHT, value: C.weightFraction(d.weight, denom) },
-                      {
-                        label: C.TT_MAIN_SLOTS,
-                        value: C.mainSlotsNote(
-                          mainSlotsOf(d.attr).map((s) => SLOT_NAMES[s]),
-                          d.attr === FIXED_MAIN.花 || d.attr === FIXED_MAIN.羽,
-                        ),
-                      },
-                    ];
+                    const denom =
+                      SUB_WEIGHT_SUM - (excluded && !d.excluded ? SUB_WEIGHTS[excluded] : 0);
+                    return [{ label: C.TT_WEIGHT, value: C.weightFraction(d.weight, denom) }];
                   },
                   onPick: (i) => {
                     const attr = data[i]?.attr;

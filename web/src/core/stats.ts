@@ -186,21 +186,6 @@ export function mainWeightAt(position: Position, attr: MainAttr): number | undef
 }
 
 /**
- * 这个词条**能当哪些部位的主词条**（游戏口径）。
- *
- * - 花 / 羽 的主词条是固定的（小生命 / 小攻击），只有那一个；
- * - 沙 / 杯 / 头 能出的 7 条按 `MAIN_WEIGHTS` 查；
- * - **小防御永远不能当主词条**（副词条里有它，主词条里没有）→ 空数组。
- *
- * 界面在权重图的浮框里用它回答「这个词条能不能当主词条」。
- */
-export function mainSlotsOf(attr: MainAttr): Slot[] {
-  if (attr === FIXED_MAIN.花) return ['花'];
-  if (attr === FIXED_MAIN.羽) return ['羽'];
-  return SLOTS.filter((slot) => hasRandomMain(slot) && MAIN_WEIGHTS[slot][attr] !== undefined);
-}
-
-/**
  * 各部位「可用的主词条集合」与「主词条概率」。
  *
  * 主词条要按**部位**分开算：沙不会出元素伤害、头不会出充能，

@@ -154,26 +154,13 @@ export const TT_WEIGHT = '权重';
  *
  * 权重图那张**分母会变**：选了某个词条当主词条之后，其余词条的权重按剩余之和归一
  * （`1100 − 该主词条的权重`），而被选中那一根仍然按 1100 显示它原本的占比 ——
- * 所以「分子 ÷ 分母」永远等于柱顶那个数。**不另外加一行解释**（作者要求只两行）。
+ * 所以「分子 ÷ 分母」永远等于柱顶那个数。
+ *
+ * **权重图的浮框一共就两行**（标题 + 这一行）：作者 2026-10-07 把「主词条 …」与
+ * 「当前口径 …」两行都点掉过，别再往里加解释。
  */
 export function weightFraction(w: number, sum: number): string {
   return `${w} / ${sum}`;
-}
-/** 「这个词条能当哪些部位的主词条」 */
-export const TT_MAIN_SLOTS = '主词条';
-/**
- * 能当主词条时怎么写。
- *
- * - 花 / 羽：那一个部位**固定**就是它；
- * - 一个部位：`时之沙的主词条`；
- * - 多个部位：`时之沙 / 空之杯 / 理之冠 都能当主词条`；
- * - **一个都不能**（只有小防御）：`只能当副词条`。
- */
-export function mainSlotsNote(names: readonly string[], fixed: boolean): string {
-  if (names.length === 0) return '只能当副词条';
-  const joined = names.join(' / ');
-  if (fixed) return `${joined}固定的主词条`;
-  return names.length === 1 ? `${joined}的主词条` : `${joined}都能当主词条`;
 }
 export const HEAT_TITLE = '给定主词条的副词条概率';
 /**
