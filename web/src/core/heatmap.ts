@@ -30,14 +30,11 @@
  */
 
 import {
-  POSITIONS,
-  SLOT_NAMES,
   SUB_ATTRS,
   SUB_WEIGHTS,
   SUB_WEIGHT_SUM,
   canonicalMainAttr,
   excludedSubstat,
-  mainProbabilities,
   type MainAttr,
   type SubAttr,
 } from './stats';
@@ -54,35 +51,14 @@ export interface SubProb {
  * 与副词条那张热力图是**两个不同的问题**：
  *   - 这张问「掉下来的这件，主词条是什么」（`stats.mainProbabilities`，就是权重占比）；
  *   - 那张问「主词条定了之后，副词条一条条抽出来是什么」。
- * 两张都**不依赖任何配置**（部位与主词条只是表格的维度，不是输入）。
+ * 两张都**不依赖任何配置**（部位与主词条只是维度，不是输入）。
  *
  * 沙 / 杯 / 头 是仅有的三个「主词条可随机」的部位；花 / 羽 的主词条固定
- * （生命值 / 攻击力，概率 1），放进来只是一行全是同一个数，所以不列。
+ * （生命值 / 攻击力，概率 1），画出来只有一根 100% 的柱子，所以不列。
+ *
+ * 界面上这张**不是热图**（作者 2026-10-07：「热图不合适。我建议按部位分别绘制柱状图」）：
+ * 一部位一张柱状图，`mainProbabilities(部位)` 就是那三张图的数据。
  */
-
-/** 列（可能成为主词条的词条），顺序取「玩家遇到的顺序」：沙 → 杯 → 头 各自新增的那些 */
-export const MAIN_ATTR_COLS: readonly string[] = [
-  '大生命', '大防御', '大攻击', '充能', '精通', // 沙
-  '物伤', '火伤', '雷伤', '岩伤', '风伤', '水伤', '冰伤', '草伤', // 杯
-  '暴击', '爆伤', '治疗', // 头
-];
-
-export interface MainAttrRow {
-  /** 部位（`沙` / `杯` / `头`） */
-  key: string;
-  label: string;
-  /** 该部位**能出**的主词条；不在里面的列就是空格子（该部位不出它） */
-  probs: { attr: string; p: number }[];
-}
-
-export function mainAttrHeatmap(): MainAttrRow[] {
-  return POSITIONS.map((pos) => ({
-    key: pos,
-    label: SLOT_NAMES[pos],
-    // 权重表只覆盖各部位可出现的主词条，所以这里不需要再过滤
-    probs: mainProbabilities(pos).map((d) => ({ attr: d.attr as string, p: d.p })),
-  }));
-}
 
 /** 「其他主词条」那一行的键（元素伤害 / 物伤 / 治疗这类只做主词条的词条） */
 export const OTHER_MAIN = '其他';
@@ -155,4 +131,40 @@ export function substatHeatmap(): HeatRow[] {
 /** 当前主词条落在哪一行上；`pooled` 之外（元素伤害等）都归到「其他」 */
 export function heatRowKey(mainAttr: MainAttr): string {
   return excludedSubstat(canonicalMainAttr(mainAttr)) ?? OTHER_MAIN;
+}
+
+/** 一条副词条的权重与它在当前口径下的概率 */
+export interface SubstatWeight {
+  attr: SubAttr;
+  /** 模型里的权重（固定的表，与部位无关） */
+  weight: number;
+  /** 权重占比 / 当前口径下归一后的概率 */
+  p: number;
+  /** 被用户点掉的那一条（界面上压暗并标「已排除」） */
+  excluded: boolean;
+}
+
+/**
+ * 副词条权重表（界面「词条权重」子 tab 那张图）。
+ *
+ * 权重是**固定的模型输入**（`SUB_WEIGHTS`，合计 1100），与部位无关；
+ * 变的只是归一化之后算出来的概率。给了 `excluded` 就模拟「这个词条已经不在池子里」，
+ * 也就是「主词条不会出现在副词条里」那条规则：
+ *
+ * ```
+ * p = w / (Σw − w_排除)
+ * ```
+ *
+ * 与 `nextSubstatDist` 是同一个式子（那边的 `mainAttr` 就是这里的 `excluded`），
+ * 区别只在**返回全部 10 条**：被排除的那一条也在列表里（`excluded: true`），
+ * 这样界面上那根柱子还在原处、只是被压暗 —— 概率给的是它**不排除时**的占比。
+ */
+export function substatWeights(excluded?: SubAttr): SubstatWeight[] {
+  const rest = SUB_WEIGHT_SUM - (excluded ? SUB_WEIGHTS[excluded] : 0);
+  return SUB_ATTRS.map((attr) => ({
+    attr,
+    weight: SUB_WEIGHTS[attr],
+    p: SUB_WEIGHTS[attr] / (attr === excluded ? SUB_WEIGHT_SUM : rest),
+    excluded: attr === excluded,
+  }));
 }

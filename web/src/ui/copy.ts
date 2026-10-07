@@ -107,24 +107,43 @@ export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
 /**
- * 「基础概率」的两个子 tab：掉落是怎么抽出来的，两张二维概率表。
+ * 「基础概率」的两个子 tab：掉落是怎么抽出来的。
  *
- * 名字直接写两个维度（行 × 列），比「主词条概率」这种叫法更清楚 ——
- * 表里读的是「这两个维度交叉起来是个什么数」。
+ * 第一个（作者 2026-10-07 命名）叫「词条权重」：主词条概率按部位分别画柱状图，
+ * 外加一张副词条权重图。第二个是主词条 × 副词条的热图（**保留热图**，
+ * 作者：「这个热图是非常好的，用热图。只第一张不适合热图」）。
  */
-export const SUB_BASIC_MAIN = '部位 × 主词条';
+export const SUB_BASIC_WEIGHTS = '词条权重';
 export const SUB_BASIC_SUB = '主词条 × 副词条';
 
-/** 第一张：部位 × 主词条的二维概率表 */
+/** 三个部位的主词条概率（一部位一张柱状图） */
 export const MAIN_PROB_TITLE = '各部位的主词条概率';
 /**
  * 主词条概率是**条件**概率（前提是已经掉到了这个部位，与「该部位的胚子概率」同一口径）；
- * 空格子是「该部位不出这个词条」，不是 0%。
+ * 图上每个部位的柱子共用一条纵轴，柱高才能横向比。
  */
-export const MAIN_PROB_HINT =
-  '已掉到该部位的前提下，出这个主词条的概率；空格子 = 该部位不出它。';
-export const MAIN_PROB_ROW_AXIS = '部位';
-export const MAIN_PROB_COL_AXIS = '主词条';
+export const MAIN_PROB_HINT = '已掉到该部位的前提下，出这个主词条的概率。';
+
+/** 副词条权重：一张可以点着玩的图 —— 点柱子 = 把该词条移出池子 */
+export const WEIGHTS_TITLE = '副词条权重';
+/**
+ * 这张图的玩法（作者 2026-10-07 定的）：**点柱子 = 把这个词条从池子里去掉**，
+ * 其余词条按剩下的权重重新归一 —— 那正是「主词条不会出现在副词条里」这条规则，
+ * 所以点一下就能看出「某个词条当主词条时，副词条概率变成多少」。
+ *
+ * 权重本身与部位无关（`SUB_WEIGHTS` 是一张固定的表）；变的只是归一化之后算出来的概率。
+ */
+export const WEIGHTS_HINT =
+  '权重与部位无关；点柱子 = 把这个词条从池子里去掉，其余按权重重新归一' +
+  '（「主词条不会出现在副词条里」就是这个道理），再点一次恢复。';
+/** 权重图的小标题：跟着当前排除了哪一条走 */
+export function weightsChartTitle(excluded: string | null): string {
+  return excluded === null
+    ? '不排除任何词条（条长 = 权重占比）'
+    : `已排除「${excluded}」· 其余按权重归一`;
+}
+/** 被点掉那一根上的字（数字位置让给它） */
+export const EXCLUDED_TAG = '已排除';
 export const HEAT_TITLE = '给定主词条的副词条概率';
 /**
  * 热力图的口径。

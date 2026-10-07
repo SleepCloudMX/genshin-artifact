@@ -1,12 +1,18 @@
 /**
  * 热力图：行 = 主词条，列 = 副词条，格子里是**概率**。
  *
+ * 全站**只剩这一张热图**（「主词条 × 副词条」，在「基础概率」的第二个子 tab 里）——
+ * 作者 2026-10-07：「这个热图是非常好的，用热图。只第一张不适合热图」，
+ * 第一张（部位 × 主词条）已经改成按部位分别画的柱状图，见 `renderHistogram`。
+ *
  * 参考 `docs/ai-ref/v1/init_stats/主词条-副词条.png`（归档的 `plot_substat_heatmap`），
  * 但**配色换成站内那一套**：单色相的蓝色梯度（浅 → `CATEGORICAL_COLORS` 的蓝 → 深蓝），
  * 参考图那张是 matplotlib 的 `YlOrRd`，黄到深红，与网页其他地方不是一个调子。
  *
  * 每格自带命中测试（格子本身就是热区）：格子上没有别的东西可读，
- * 不像折线图那样需要一条竖线指出位置。
+ * 不像折线图那样需要一条竖线指出位置。**这张图与配置无关** ——
+ * 早先会把「当前选的主词条」那一行描一圈，作者 2026-10-07 让一起去掉了
+ * （这一页没有配置栏，标出来也没法在这儿改）。
  */
 
 import type { HeatRow } from '../core/heatmap';
@@ -59,10 +65,6 @@ export interface HeatmapOptions {
   rows: HeatRowLike[];
   /** 列，顺序即绘制顺序（元素既当标识也当列名） */
   cols: readonly string[];
-  /** 当前主词条所在行的 `key`（`core/heatmap.ts` 的 `heatRowKey`）；不给就不高亮 */
-  highlightRow?: string;
-  /** 同时给出这一列时，只把**那一格**框出来（「你现在选的是这一格」） */
-  highlightCol?: string;
   /**
    * 悬停某格时浮框里那组「再下一条」的横排柱。
    *
@@ -197,30 +199,10 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
         x: -10,
         y: y + cellH / 2 + 3.5,
         'text-anchor': 'end',
-        class: row.key === opts.highlightRow ? 'hm-row-label on' : 'hm-row-label',
+        class: 'hm-row-label',
         'data-row': row.key,
       }),
     );
-
-    // 当前那一行 / 那一格：描一圈（作者一贯要求「当前这一项要看得出来」）
-    if (row.key === opts.highlightRow) {
-      const colIdx = opts.highlightCol ? cols.indexOf(opts.highlightCol) : -1;
-      // 给了列就只框那一格（「部位 × 主词条」：你选的是这一个组合）
-      const box =
-        colIdx >= 0
-          ? { x: colIdx * cellW - 0.75, width: cellW + 1.5 }
-          : { x: -0.75, width: plotW + 1.5 };
-      plot.append(
-        el('rect', {
-          x: box.x,
-          y: y + 0.75,
-          width: box.width,
-          height: Math.max(cellH - 1.5, 1),
-          rx: 3,
-          class: colIdx >= 0 ? 'hm-cell-box' : 'hm-row-box',
-        }),
-      );
-    }
   });
 
   // 列名

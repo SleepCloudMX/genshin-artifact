@@ -31,24 +31,23 @@
  */
 
 import {
+  POSITIONS,
   SLOTS,
   SLOT_NAMES,
   SUB_ATTRS,
   GROWTH_ORDER,
   excludedAt,
   excludedSubstat,
-  hasRandomMain,
   mainAttrsOf,
+  mainProbabilities,
   type MainAttr,
   type Slot as ArtifactSlot,
   type SubAttr,
 } from '../core/stats';
 import {
-  MAIN_ATTR_COLS,
-  heatRowKey,
-  mainAttrHeatmap,
   nextSubstatDist,
   substatHeatmap,
+  substatWeights,
 } from '../core/heatmap';
 import {
   BUCKET_OPTIONS,
@@ -1569,53 +1568,135 @@ export function mount(root: HTMLElement): void {
   // -------------------------------------------------------------------------
 
   /**
-   * 「基础概率」：**掉落是怎么抽出来的**。两张二维概率表，都与配置无关 ——
-   * 部位 / 主词条在这里是表格的维度，不是你填的输入。
+   * 「词条权重」那几张图的**固定**纵轴。
    *
-   * ① 部位（纵）× 主词条（横）：格 = P(该部位出该主词条)；
-   * ② 主词条（纵）× 副词条（横）：格 = 「下一条副词条是该词条」的概率
-   *    （热力图那套逐条抽取的口径，不是「词条概率」子 tab 的「4 条里含有它」），
-   *    悬停某格给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
+   * 三张主词条图共用一条轴，柱高才能横向比（最高的那根是沙的大生命 26.68%）；
+   * 权重图也固定一条，点掉 / 恢复某个词条时前后可比
+   * （最大 150 / 1025 ≈ 14.6%，`niceAxis` 会把它抬到 20%）。
+   */
+  const MAIN_PROB_AXIS = 0.3;
+  const WEIGHT_AXIS = 0.16;
+
+  /**
+   * 量一下容器的实际宽度，当画布宽度。
    *
-   * 两张表各占一个子 tab（作者 2026-10-07：「这两张图放在两个子 tab 里」）：
-   * 它们回答的是两个不同的问题，并排摆会把两张 16 列的宽表都压窄。
+   * 这几张图**必须自己量**：`fitSize` 的 `minW` 是 720，而「词条权重」那三张是并排的，
+   * 最窄只有 470 左右 —— 交给 `fitSize` 就会拿到一个 720 宽的 viewBox，再被 CSS 缩到
+   * 470 显示，字号跟着缩成 0.65 倍（10.5px 变 6.8px，看不清）。
+   * 上限仍取 `fitSize` 的 1320：再宽就让它等比拉伸，别把几根柱子摊到 2000px 去。
+   */
+  function chartWidth(el: HTMLElement, max = 1320): number {
+    const w = Math.round(el.clientWidth);
+    return Math.min(max, w > 0 ? w : 720);
+  }
+
+  /**
+   * 「基础概率」：**掉落是怎么抽出来的**，两张图都与配置无关 ——
+   * 部位 / 主词条在这里是维度，不是你填的输入，所以这一页没有配置栏。
+   *
+   * ① 「词条权重」（作者 2026-10-07 命名）：三个部位的主词条概率，**一部位一张柱状图**
+   *    （原来是 3×16 的热图，作者：「热图不合适。我建议按部位分别绘制柱状图」），
+   *    外加一张副词条权重图 —— **点柱子就把该词条移出池子**，其余按权重重新归一，
+   *    正是「主词条不会出现在副词条里」那条规则。
+   * ② 「主词条 × 副词条」：**保留热图**（作者：「这个热图是非常好的，用热图」），
+   *    格 = 「下一条副词条是该词条」的概率，悬停给出**再下一条**的分布。
+   *
+   * 两张图各占一个子 tab：它们回答的是两个不同的问题（一个是「主词条是什么」，
+   * 一个是「主词条定了之后副词条怎么抽」）。
+   *
+   * **这一页与配置彻底无关**（作者 2026-10-07 定的）：原来热图上会框出
+   * 「你现在选的是这一格」、并把当前主词条那一行标蓝，两处都去掉了 ——
+   * 这一页没有配置栏，标出来也没法在这儿改。
    */
   const basicTab: Tab = {
     id: 'basic',
     label: C.TAB_BASIC,
-    // **不需要配置**：两张表与配置无关（部位 / 主词条在这里是表的维度）。
-    // 省略 `controls` → 右栏整栏收掉，宽度让给这两张宽表（见 `selectTab`）。
+    // **不需要配置**：两张图与配置无关。省略 `controls` → 右栏整栏收掉（见 `selectTab`）。
 
     mount(host, tabCtx) {
       const panels = node('div', { class: 'subtab-panels' });
       const bar = node('div', { class: 'subtabs', role: 'tablist' });
+      /** 权重图里被点掉的那一条；**看图状态，不进 URL**（与配置也无关） */
+      let excluded: SubAttr | null = null;
 
       const subs: SubTab[] = [
         {
-          label: C.SUB_BASIC_MAIN,
+          label: C.SUB_BASIC_WEIGHTS,
           render(box) {
-            const p = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
-            p.box.classList.add('flush');
-            const chart = node('div', { class: 'chart-wrap', id: 'mainProbChart' });
-            p.body.append(chart);
-            box.append(p.box);
-            chart.append(
-              renderHeatmap({
-                rows: mainAttrHeatmap(),
-                cols: MAIN_ATTR_COLS,
-                // 把「你现在选的那一格」框出来：概率与配置无关，这只是个位置提示
-                ...(hasRandomMain(state.slot)
-                  ? { highlightRow: state.slot, highlightCol: state.mainAttr }
-                  : {}),
-                rowAxis: C.MAIN_PROB_ROW_AXIS,
-                colAxis: C.MAIN_PROB_COL_AXIS,
-                // 只有三行：格子别拉成一整块，画布也要扁一些（否则上下各空一大片）
-                cellMaxH: 56,
-                ratio: 0.28,
-                host: chart,
-                tooltip: tabCtx.tooltip,
-              }),
-            );
+            // ① 三个部位各一张：柱高 = 该部位的 P(主词条)。
+            //    三张共用一条纵轴，柱高才能横向比（最高的那根是沙的大生命 26.68%）。
+            //
+            //    **先把三个格子都挂上、再画**：`auto-fit` 的列数取决于有几个格子，
+            //    边挂边画时第一张量到的还是「整行」的宽度（后两张一加进来就被缩窄了），
+            //    于是那张图的字号会跟着缩水。
+            const p1 = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
+            const stack = node('div', { class: 'chart-stack' });
+            // 概率降序：柱状图的读法就是「谁大谁小」，按大小排最省事
+            const perPos = POSITIONS.map((pos) => ({
+              pos,
+              data: mainProbabilities(pos)
+                .slice()
+                .sort((a, b) => b.p - a.p),
+            }));
+            const cells = perPos.map(({ pos, data }) => {
+              // 空之杯能出 12 个主词条（沙 5 / 头 7 个）：让它占整行，标号才不挤
+              const wrap = node('div', {
+                class: data.length > 8 ? 'chart-wrap wide' : 'chart-wrap',
+              });
+              stack.append(wrap);
+              return { pos, data, wrap };
+            });
+            p1.body.append(stack);
+            box.append(p1.box);
+            for (const { pos, data, wrap } of cells) {
+              wrap.append(
+                renderHistogram({
+                  items: data.map((d) => ({ label: d.attr as string, value: d.p })),
+                  title: SLOT_NAMES[pos],
+                  upper: MAIN_PROB_AXIS,
+                  plain: true,
+                  width: chartWidth(wrap),
+                  height: 230,
+                  host: wrap,
+                  tooltip: tabCtx.tooltip,
+                }),
+              );
+            }
+
+            // ② 副词条权重：点柱子 = 把该词条移出池子（再点一次恢复）
+            const p2 = panel(C.WEIGHTS_TITLE, C.WEIGHTS_HINT);
+            p2.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'weightChart' });
+            p2.body.append(chart);
+            box.append(p2.box);
+            paint();
+
+            function paint(): void {
+              const data = substatWeights(excluded ?? undefined);
+              chart.replaceChildren(
+                renderHistogram({
+                  items: data.map((d) => ({ label: d.attr, value: d.p })),
+                  // 第二行小字就是权重本身 —— 「列一下所有副词条的权重」要的就是它，
+                  // 而且它不随点击变（变的是归一化之后的概率）
+                  subLabels: data.map((d) => String(d.weight)),
+                  dimmed: data.findIndex((d) => d.excluded),
+                  dimmedLabel: C.EXCLUDED_TAG,
+                  title: C.weightsChartTitle(excluded),
+                  upper: WEIGHT_AXIS,
+                  plain: true,
+                  width: chartWidth(chart),
+                  height: 260,
+                  host: chart,
+                  tooltip: tabCtx.tooltip,
+                  onPick: (i) => {
+                    const attr = data[i]?.attr;
+                    if (!attr) return;
+                    excluded = excluded === attr ? null : attr;
+                    paint();
+                  },
+                }),
+              );
+            }
           },
         },
         {
@@ -1630,7 +1711,6 @@ export function mount(root: HTMLElement): void {
               renderHeatmap({
                 rows: substatHeatmap(),
                 cols: SUB_ATTRS,
-                highlightRow: heatRowKey(state.mainAttr),
                 // 浮框里的条：把「这一格已经抽走」代进模型，得到再下一条的分布。
                 // 条长按本组最大值折算（这几个概率都在 10% 上下，按原值画全是一小截），
                 // 所以 `nextCaption` 必须写明这件事。
@@ -1658,8 +1738,8 @@ export function mount(root: HTMLElement): void {
       const sub = mountSubTabs(bar, panels, subs, tabCtx);
       host.append(bar, panels);
 
-      // 两张表的**数字**与配置无关，但「你现在选的是这一格 / 这一行」的框跟着走：
-      // 别的任务里改了部位或主词条，回到这一页（或正在这一页）都要重画。
+      // 两张图的数字都与配置无关，但**子 tab 切换后要重画**（只渲染当前可见的那个）；
+      // 权重图上「排除了哪一条」是这一页自己的看图状态，重画时保持。
       this.update = () => sub.refresh();
     },
   };

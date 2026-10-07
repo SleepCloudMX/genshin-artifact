@@ -507,6 +507,18 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 
 /* ---------- 图表 ---------- */
 .chart-wrap { width: 100%; }
+/* 「词条权重」那三张按部位的主词条图：两小的并排，柱子多的那张占整行
+   （`grid-auto-flow: dense` 让第三张补上空出来的那一格，不留空档）。 */
+.chart-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: row dense;
+  gap: 6px 16px;
+}
+.chart-stack > .chart-wrap.wide { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .chart-stack { grid-template-columns: minmax(0, 1fr); }
+}
 svg.chart { display: block; width: 100%; height: auto; }
 
 /* 图里的文字一律不吃鼠标事件。
@@ -525,10 +537,17 @@ svg.pie text { pointer-events: none; }
 .legend-label { fill: var(--text-dim); font-size: 11px; }
 
 .bar-seg { transition: opacity .12s; }
-/* 分类柱里被挑出来的那一根（如当前主词条的概率柱）：用强调色，与主题无关地写死在 CSS 里 */
-.bar-seg.bar-hot { fill: var(--accent); }
+/* 单色柱（主词条概率、副词条权重）：类目之间没有「档」的含义，用一个强调色就够 */
+.bar-seg.bar-plain { fill: var(--accent); }
+/* 被点掉的那一根（权重图里「已排除」）：压暗，但**留在原处**，看得出挑掉的是哪一条 */
+.bar-seg.bar-off { fill: var(--text-faint); opacity: .5; }
 .hot-rect { cursor: crosshair; }
+/* 能点的柱子（权重图）：光标换成手，才知道这里可以点 */
+.hot-rect.pickable { cursor: pointer; }
 .bar-label { fill: var(--text-dim); font-size: 9.5px; font-family: var(--mono); }
+.bar-label-off { fill: var(--text-faint); font-weight: 600; }
+/* 横轴标号下面的第二行小字（权重） */
+.axis-sub { fill: var(--text-faint); font-size: 9.5px; font-family: var(--mono); }
 
 .marker-line { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; }
 .marker-label { fill: var(--text-faint); font-size: 10.5px; font-family: var(--mono); }
@@ -714,11 +733,7 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .hm-cell.hm-hole { fill: var(--bg-soft); stroke: var(--border); stroke-width: .5; stroke-dasharray: 2 2; }
 .hm-value.hm-empty { fill: var(--text-faint); }
 .hm-row-label { fill: var(--text-dim); font-size: 10.5px; }
-.hm-row-label.on { fill: var(--accent); font-weight: 650; }
 .hm-col-label { fill: var(--text-dim); font-size: 10.5px; }
-/* 当前那一行 / 那一格整体描一圈 */
-.hm-row-box { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-.hm-cell-box { fill: none; stroke: var(--accent); stroke-width: 2; }
 .hm-legend { shape-rendering: crispEdges; }
 
 /* ---------- 表格 ---------- */

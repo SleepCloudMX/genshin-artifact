@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { mount } from '../src/ui/app';
 import * as C from '../src/ui/copy';
+import { pct } from '../src/ui/format';
 import { GROWTH_ORDER, SUB_ATTRS } from '../src/core/stats';
+import { nextSubstatDist } from '../src/core/heatmap';
 import {
   CANONICAL_WEIGHT,
   QUALITY_WEIGHT,
@@ -727,25 +729,110 @@ describe('主 tab 与子 tab', () => {
     expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);
   });
 
-  it('「基础概率」是两个子 tab：部位 × 主词条、主词条 × 副词条各一张表', () => {
+  it('「基础概率」是两个子 tab：词条权重（三张主词条柱状图 + 权重图）、主词条 × 副词条热图', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'basic');
-    expect(subLabels(root)).toEqual([C.SUB_BASIC_MAIN, C.SUB_BASIC_SUB]);
-    // 一张图一个子 tab：第一个子 tab 里**只有**第一张表，两张不再同框
+    expect(subLabels(root)).toEqual([C.SUB_BASIC_WEIGHTS, C.SUB_BASIC_SUB]);
+    // 一张图一个子 tab：第一个子 tab 里只有「词条权重」那几张图
     const first = visibleSubPanel(root);
-    expect(first.querySelector('#mainProbChart svg')).not.toBeNull();
+    expect(first.querySelectorAll('.chart-stack svg.chart')).toHaveLength(3);
+    expect(first.querySelector('#weightChart svg')).not.toBeNull();
     expect(first.querySelector('#substatHeatmap')).toBeNull();
 
     clickSub(root, C.SUB_BASIC_SUB);
     const second = visibleSubPanel(root);
     expect(second.querySelector('#substatHeatmap svg')).not.toBeNull();
-    expect(second.querySelector('#mainProbChart')).toBeNull();
+    expect(second.querySelector('#weightChart')).toBeNull();
     // 侧边栏把这两个子任务列在「基础概率」下面（与图表上方那一排同一份状态）
     expect([...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent)).toEqual([
-      C.SUB_BASIC_MAIN,
+      C.SUB_BASIC_WEIGHTS,
       C.SUB_BASIC_SUB,
     ]);
+  });
+
+  it('「词条权重」：三个部位各一张柱状图，横轴是该部位能出的主词条', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    const charts = [...visibleSubPanel(root).querySelectorAll('.chart-stack svg.chart')];
+    expect(charts.map((c) => c.querySelector('text.chart-title')!.textContent)).toEqual([
+      '时之沙',
+      '空之杯',
+      '理之冠',
+    ]);
+    // 柱数 = 该部位能出的主词条数：沙 5、杯 12、头 7（花 / 羽 主词条固定，不列）
+    expect(charts.map((c) => c.querySelectorAll('rect.bar-seg').length)).toEqual([5, 12, 7]);
+    // 数字就是 stats 里那张表（沙的大生命 26.68%、杯的火伤 5.00%、头的爆伤 10.00%）
+    const labelsOf = (i: number) => {
+      const chart = charts[i]!;
+      // 横轴标号是居中的那些（纵轴刻度右对齐）
+      const names = [...chart.querySelectorAll('text.axis-label')]
+        .filter((t) => t.getAttribute('text-anchor') === 'middle')
+        .map((t) => t.textContent!);
+      const values = [...chart.querySelectorAll('text.bar-label')].map((t) => t.textContent!);
+      return Object.fromEntries(names.map((n, k) => [n, values[k]]));
+    };
+    expect(labelsOf(0)['大生命']).toBe('26.68%');
+    expect(labelsOf(1)['火伤']).toBe('5.00%');
+    expect(labelsOf(2)['爆伤']).toBe('10.00%');
+    // 概率降序：第一根就是该部位最大的那个
+    expect(Object.values(labelsOf(0))[0]).toBe('26.68%');
+    // 三张图共用一条纵轴（柱高才能横向比）：0 / 10 / 20 / 30%
+    for (const c of charts) {
+      const ticks = [...c.querySelectorAll('text.axis-label')]
+        .filter((t) => Number(t.getAttribute('x')) < 0)
+        .map((t) => t.textContent);
+      expect(ticks).toEqual(['0%', '10%', '20%', '30%']);
+    }
+  });
+
+  it('「词条权重」：副词条那张图列出全部权重，点柱子就把该词条排除', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    const chart = () => visibleSubPanel(root).querySelector('#weightChart')!;
+    const labels = () =>
+      [...chart().querySelectorAll('text.bar-label')].map((t) => t.textContent);
+    const pick = (i: number): void => {
+      chart()
+        .querySelectorAll('rect.hot-rect')
+        [i]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    };
+
+    expect(chart().querySelectorAll('rect.bar-seg')).toHaveLength(10);
+    // 第二行小字 = 权重（与部位无关的那张固定表）
+    expect([...chart().querySelectorAll('text.axis-sub')].map((t) => t.textContent)).toEqual([
+      '150', '150', '150', '100', '100', '100', '75', '75', '100', '100',
+    ]);
+    // 不排除任何词条时，数字 = 权重占比
+    expect(labels()).toEqual([
+      '13.64%', '13.64%', '13.64%', '9.09%', '9.09%', '9.09%', '6.82%', '6.82%', '9.09%', '9.09%',
+    ]);
+    expect(chart().querySelector('text.chart-title')!.textContent).toBe(C.weightsChartTitle(null));
+
+    // 点「小生命」那一根 → 它被排除，其余按 950 归一
+    pick(0);
+    expect(labels()).toEqual([
+      C.EXCLUDED_TAG, '15.79%', '15.79%', '10.53%', '10.53%', '10.53%', '7.89%', '7.89%', '10.53%',
+      '10.53%',
+    ]);
+    expect(chart().querySelector('text.chart-title')!.textContent).toBe(
+      C.weightsChartTitle('小生命'),
+    );
+    // 这张图就是 core 那套「下一条副词条」（主词条 = 小生命 时）的分布
+    expect(labels().slice(1)).toEqual(nextSubstatDist('小生命').map((d) => pct(d.p)));
+
+    // 再点一次恢复
+    pick(0);
+    expect(labels()[1]).toBe('13.64%');
+    expect(chart().querySelectorAll('rect.bar-off')).toHaveLength(0);
+
+    // 点另一根：换成排除它（同时只有一条被排除）
+    pick(6);
+    expect(chart().querySelectorAll('rect.bar-off')).toHaveLength(1);
+    expect(labels()[6]).toBe(C.EXCLUDED_TAG);
+    expect(labels()[0]).toBe('14.63%'); // 150 / 1025
   });
 
   it('组合概率：标注画在图上，得分最高的那一项被摘出来', () => {
@@ -974,89 +1061,47 @@ describe('主 tab 与子 tab', () => {
     expect(chart.querySelectorAll('rect.bar-seg').length).toBeGreaterThan(0);
   });
 
-  it('「部位 × 主词条」：三行 × 十六列，数字与配置无关', () => {
-    const root = freshRoot();
-    mount(root);
-    clickTab(root, 'basic');
-    const panel = visibleSubPanel(root);
-
-    // 沙 / 杯 / 头 三行（花羽主词条固定，不列）× 16 列
-    const cells = panel.querySelectorAll('#mainProbChart rect.hm-cell');
-    expect(cells).toHaveLength(3 * 16);
-    const cellText = (row: string, col: string) =>
-      panel.querySelector(`#mainProbChart text.hm-value[data-row="${row}"][data-col="${col}"]`)
-        ?.textContent;
-    // 沙出大生命 = 1334/5000 = 26.68%；杯出火伤 = 200/4000 = 5.00%
-    expect(cellText('沙', '大生命')).toBe('26.68%');
-    expect(cellText('杯', '火伤')).toBe('5.00%');
-    expect(cellText('头', '爆伤')).toBe('10.00%');
-    // 该部位出不来的那几格是空格子，不是 0%
-    expect(
-      panel
-        .querySelector('rect.hm-cell[data-row="沙"][data-col="火伤"]')!
-        .classList.contains('hm-hole'),
-    ).toBe(true);
-    expect(cellText('沙', '火伤')).toBe('—');
-  });
-
-  it('「部位 × 主词条」：换配置时数字一格不变，只有「你选的是这一格」的框跟着走', () => {
-    const root = freshRoot();
-    mount(root);
-    clickTab(root, 'basic');
-    const before = [...visibleSubPanel(root).querySelectorAll('#mainProbChart text.hm-value')]
-      .map((t) => t.textContent)
-      .join(',');
-    const beforeBox = visibleSubPanel(root).querySelector('rect.hm-cell-box')!.getAttribute('x');
-
-    // 这一页没有配置栏，所以「改配置」是在别的任务里发生的 —— 回到这一页要重画
-    clickTab(root, 'growth');
-    pickSlotAndMain(root, '头', '暴击');
-    clickTab(root, 'basic');
-
-    const after = [...visibleSubPanel(root).querySelectorAll('#mainProbChart text.hm-value')]
-      .map((t) => t.textContent)
-      .join(',');
-    expect(after).toBe(before);
-    const box2 = visibleSubPanel(root).querySelector('rect.hm-cell-box')!;
-    expect(box2.getAttribute('x')).not.toBe(beforeBox);
-  });
-
-  it('「主词条 × 副词条」：十行 × 十列，当前主词条那一行高亮', () => {
+  it('「主词条 × 副词条」：十行 × 十列，这一页不再跟配置走', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'basic');
     clickSub(root, C.SUB_BASIC_SUB);
-    const panel = visibleSubPanel(root);
-    // 默认主词条是火伤 → 走「其他」那一行
-    expect(panel.querySelectorAll('#substatHeatmap rect.hm-cell')).toHaveLength(100);
-    expect(panel.querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe('其他');
+    expect(visibleSubPanel(root).querySelectorAll('#substatHeatmap rect.hm-cell')).toHaveLength(100);
 
+    // 换配置（在别的任务里改）之后，格里的数字一格不变，也**不再**标当前主词条那一行
+    const before = [...visibleSubPanel(root).querySelectorAll('#substatHeatmap text.hm-value')]
+      .map((t) => t.textContent)
+      .join(',');
     clickTab(root, 'growth');
     pickSlotAndMain(root, '头', '暴击');
     clickTab(root, 'basic');
     clickSub(root, C.SUB_BASIC_SUB);
+    const panel = visibleSubPanel(root);
     expect(
-      visibleSubPanel(root).querySelector('#substatHeatmap text.hm-row-label.on')!.textContent,
-    ).toBe('暴击');
+      [...panel.querySelectorAll('#substatHeatmap text.hm-value')].map((t) => t.textContent).join(','),
+    ).toBe(before);
+    // 作者 2026-10-07：「这一页与配置彻底无关」——行高亮与格子框都删了
+    expect(panel.querySelector('#substatHeatmap text.hm-row-label.on')).toBeNull();
+    expect(panel.querySelector('#substatHeatmap rect.hm-row-box')).toBeNull();
+    expect(panel.querySelector('#substatHeatmap rect.hm-cell-box')).toBeNull();
   });
 
-  it('花 / 羽 不在「部位 × 主词条」里（主词条固定，没有可比较的概率）', () => {
+  it('花 / 羽 不画在「词条权重」里（主词条固定，只有一根 100% 的柱子）', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'growth');
     pickSlotAndMain(root, '花', '小生命');
     clickTab(root, 'basic');
-    const panel = visibleSubPanel(root);
-    // 行还是沙 / 杯 / 头三行，且**没有**「你现在选的是这一格」的框（花不在表里）
-    expect([...panel.querySelectorAll('#mainProbChart text.hm-row-label')].map((t) => t.textContent)).toEqual(
-      ['时之沙', '空之杯', '理之冠'],
+    const titles = [...visibleSubPanel(root).querySelectorAll('.chart-stack text.chart-title')].map(
+      (t) => t.textContent,
     );
-    expect(panel.querySelector('#mainProbChart rect.hm-cell-box')).toBeNull();
-    // 副词条那张照样高亮「小生命」那一行
-    clickSub(root, C.SUB_BASIC_SUB);
-    expect(
-      visibleSubPanel(root).querySelector('#substatHeatmap text.hm-row-label.on')!.textContent,
-    ).toBe('小生命');
+    expect(titles).toEqual(['时之沙', '空之杯', '理之冠']);
+    // 三张图的数字与部位绑定，换了主词条也不动
+    const before = visibleSubPanel(root).querySelector('.chart-stack')!.textContent;
+    clickTab(root, 'growth');
+    pickSlotAndMain(root, '头', '暴击');
+    clickTab(root, 'basic');
+    expect(visibleSubPanel(root).querySelector('.chart-stack')!.textContent).toBe(before);
   });
 
   it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {

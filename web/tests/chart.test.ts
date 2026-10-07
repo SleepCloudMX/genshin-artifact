@@ -478,6 +478,90 @@ describe('分类柱状图', () => {
     expect(tt.textContent).not.toContain('概率');
     expect(tt.textContent).not.toContain('说明');
   });
+
+  it('单色柱：不写内联 fill（颜色交给 CSS 的 `--accent`，才跟得了主题）', () => {
+    const svg = renderHistogram({
+      items: [{ label: '沙', value: 0.2 }],
+      title: 't',
+      plain: true,
+      tooltip: makeTooltip(),
+    });
+    const bar = svg.querySelector('rect.bar-seg')!;
+    expect(bar.getAttribute('fill')).toBeNull();
+    expect(bar.classList.contains('bar-plain')).toBe(true);
+  });
+
+  it('横轴标号下的第二行小字（权重）画在同一列上', () => {
+    const svg = renderHistogram({
+      items: [
+        { label: '小生命', value: 0.1364 },
+        { label: '暴击', value: 0.0682 },
+      ],
+      subLabels: ['150', '75'],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const subs = [...svg.querySelectorAll('text.axis-sub')];
+    expect(subs.map((t) => t.textContent)).toEqual(['150', '75']);
+    // 与上面那行的标号 x 对齐（横轴标号是居中的那些，纵轴刻度是右对齐的）
+    const xLabels = [...svg.querySelectorAll('text.axis-label')].filter(
+      (t) => t.getAttribute('text-anchor') === 'middle',
+    );
+    expect(xLabels.map((t) => t.textContent)).toEqual(['小生命', '暴击']);
+    expect(subs[0]!.getAttribute('x')).toBe(xLabels[0]!.getAttribute('x'));
+    expect(Number(subs[0]!.getAttribute('y'))).toBeGreaterThan(Number(xLabels[0]!.getAttribute('y')));
+  });
+
+  it('被挑掉的那一根：压暗 + 柱顶换成调用方给的文案（数字让位）', () => {
+    const svg = renderHistogram({
+      items: [
+        { label: '小生命', value: 0.1364 },
+        { label: '暴击', value: 0.0732 },
+      ],
+      dimmed: 0,
+      dimmedLabel: '已排除',
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const bars = [...svg.querySelectorAll('rect.bar-seg')];
+    expect(bars[0]!.classList.contains('bar-off')).toBe(true);
+    expect(bars[1]!.classList.contains('bar-off')).toBe(false);
+    expect([...svg.querySelectorAll('text.bar-label')].map((t) => t.textContent)).toEqual([
+      '已排除',
+      '7.32%',
+    ]);
+    // 不传 dimmed 时一切照旧（负数也不算）
+    const plain = renderHistogram({
+      items: [{ label: '暴击', value: 0.0732 }],
+      dimmed: -1,
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    expect(plain.querySelector('rect.bar-off')).toBeNull();
+  });
+
+  it('柱子上挂了 onPick：点哪一根就回报哪一个下标，热区也换成可点光标', () => {
+    const picked: number[] = [];
+    const svg = renderHistogram({
+      items: [
+        { label: 'a', value: 0.1 },
+        { label: 'b', value: 0.2 },
+      ],
+      title: 't',
+      tooltip: makeTooltip(),
+      onPick: (i) => picked.push(i),
+    });
+    expect(svg.querySelectorAll('rect.hot-rect.pickable')).toHaveLength(2);
+    svg.querySelectorAll('rect.hot-rect')[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(picked).toEqual([1]);
+    // 不给 onPick 就不可点（命中次数那张图不该长出这个光标）
+    const plain = renderHistogram({
+      items: [{ label: 'a', value: 0.1 }],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    expect(plain.querySelector('rect.hot-rect.pickable')).toBeNull();
+  });
 });
 
 describe('质量分布', () => {
@@ -957,22 +1041,19 @@ describe('热力图（主词条 × 副词条）', () => {
     );
   });
 
-  it('行名与列名都画出来，当前主词条那一行被挑出来（行名上色 + 描一圈）', () => {
-    const svg = renderHeatmap({ rows, cols, highlightRow: '暴伤', tooltip: makeTooltip() });
+  it('行名与列名都画出来，且**不再**标出「当前主词条那一行」', () => {
+    const svg = renderHeatmap({ rows, cols, tooltip: makeTooltip() });
     expect([...svg.querySelectorAll('text.hm-row-label')].map((t) => t.textContent)).toEqual(
       rows.map((r) => r.label),
     );
     expect([...svg.querySelectorAll('text.hm-col-label')].map((t) => t.textContent)).toEqual([
       ...cols,
     ]);
-    const on = svg.querySelectorAll('text.hm-row-label.on');
-    expect(on).toHaveLength(1);
-    expect(on[0]!.textContent).toBe('暴伤');
-    expect(svg.querySelector('rect.hm-row-box')).not.toBeNull();
-    // 不给 highlightRow 就不画框
-    expect(
-      renderHeatmap({ rows, cols, tooltip: makeTooltip() }).querySelector('rect.hm-row-box'),
-    ).toBeNull();
+    // 作者 2026-10-07：「这一页与配置彻底无关」→ 行高亮与「你选的是这一格」的框都删了，
+    // 渲染器上那两个参数也一并去掉（有测试盯着，别悄悄加回来）
+    expect(svg.querySelectorAll('text.hm-row-label.on')).toHaveLength(0);
+    expect(svg.querySelector('rect.hm-row-box')).toBeNull();
+    expect(svg.querySelector('rect.hm-cell-box')).toBeNull();
   });
 
   it('悬停某格：浮框给出「再下一条」的横排柱，且写明口径', () => {

@@ -667,7 +667,11 @@ function formatCount(n: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// 3. 分类柱状图（命中次数分布）
+// 3. 分类柱状图（每个类目一根柱子）
+//
+// 三处用它：「命中次数」的分布、**各部位的主词条概率**（一部位一张）、
+// **副词条权重**（点柱子可以把该词条移出池子）。后两处追加了几个显示 / 交互开关，
+// 但图形语言是同一套：柱子 + 柱顶数值 + 横轴标号 + 悬停浮框。
 // ---------------------------------------------------------------------------
 
 export interface HistogramItem {
@@ -685,11 +689,31 @@ export interface HistogramOptions {
   /** 纵轴上限；省略则自适应 */
   upper?: number;
   /**
-   * 挑出哪一根（下标）：加一个 `bar-hot` 类，由 CSS 换成强调色。
-   * 用于「当前这一项是哪一个」的图（如当前主词条的概率柱）——
+   * 单色柱：颜色交给 CSS（`.bar-plain` → `--accent`）。
+   *
+   * 类目之间没有「档」的含义时（主词条概率、副词条权重）用这个 ——
+   * 否则会套上 `hitColor` 那套「命中 N 次」的彩虹色，读起来像加了编码。
    * 颜色写死在 JS 里就跟不了主题，所以给类名、配色留在 CSS。
    */
-  highlight?: number;
+  plain?: boolean;
+  /**
+   * 横轴标号下面的第二行小字（如权重）。给了就多画一行 —— 于是柱子少一点高度、
+   * 轴标题那一行不再需要。
+   */
+  subLabels?: readonly string[];
+  /**
+   * 被挑掉的那一根（下标）：压暗（`.bar-off`）**并且把柱顶数值换成 `dimmedLabel`**。
+   * 用于「这一条已经不在池子里了」——柱高留在原处，让人看得出挑掉的是哪一条。
+   * 传负数 / 不传 = 没有这一根。
+   */
+  dimmed?: number;
+  /** 上面那根柱子顶上写什么（文案由调用方给，渲染层不写中文） */
+  dimmedLabel?: string;
+  /**
+   * 点某一根柱子。**渲染层只回报点了哪一个**，「点了是排除还是取消」由调用方决定
+   * （权重图那张就是「再点一次恢复」）。
+   */
+  onPick?: (index: number) => void;
   /**
    * 纵轴贴着最高的柱子（`tightAxis`）而不是抬到整齐的整数倍上限。
    *
@@ -707,6 +731,7 @@ export interface HistogramOptions {
 export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   const { items, title, tooltip } = opts;
   const format = opts.format ?? ((v: number) => pct(v, 2));
+  const subs = opts.subLabels;
   const fit = fitSize(opts.host, { ratio: 0.30, minH: 260, maxH: 420 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
@@ -731,27 +756,45 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 
   items.forEach((d, i) => {
     const y = yOf(d.value);
+    const off = i === opts.dimmed;
+    const cls = ['bar-seg', opts.plain ? 'bar-plain' : '', off ? 'bar-off' : '']
+      .filter(Boolean)
+      .join(' ');
+    // 单色柱不写 `fill`：交给 CSS 的 `.bar-plain`，主题换了跟着走
     const bar = el('rect', {
       x: xOf(i) - barW / 2,
       y,
       width: barW,
       height: Math.max(f.plotH - y, 0.5),
-      fill: d.color ?? hitColor(i),
+      ...(opts.plain ? {} : { fill: d.color ?? hitColor(i) }),
       rx: 3,
-      class: i === opts.highlight ? 'bar-seg bar-hot' : 'bar-seg',
+      class: cls,
     });
     f.plot.append(bar);
     f.plot.append(
-      text(format(d.value), {
+      text(off ? (opts.dimmedLabel ?? '') : format(d.value), {
         x: xOf(i),
         y: Math.max(y - 6, 10),
         'text-anchor': 'middle',
-        class: 'bar-label',
+        class: off ? 'bar-label bar-label-off' : 'bar-label',
       }),
     );
   });
 
   xAxis(f, items.map((d, i) => ({ x: xOf(i), text: d.label })), '');
+  // 第二行小字（权重）：贴着标号下面一行，字号更小、颜色更淡
+  if (subs) {
+    subs.forEach((s, i) => {
+      f.plot.append(
+        text(s, {
+          x: xOf(i),
+          y: f.plotH + 28,
+          'text-anchor': 'middle',
+          class: 'axis-sub',
+        }),
+      );
+    });
+  }
 
   const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
   f.plot.append(guide);
@@ -764,7 +807,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       width: Math.max(bandW, 2),
       height: f.plotH,
       fill: 'transparent',
-      class: 'hot-rect',
+      class: opts.onPick ? 'hot-rect pickable' : 'hot-rect',
     });
     hit.addEventListener('mouseenter', (ev) => {
       guide.setAttribute('x1', String(x));
@@ -786,6 +829,10 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       guide.classList.remove('on');
       tooltip.hide();
     });
+    if (opts.onPick) {
+      const pick = opts.onPick;
+      hit.addEventListener('click', () => pick(i));
+    }
     f.plot.append(hit);
   });
 

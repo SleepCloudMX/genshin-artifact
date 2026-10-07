@@ -51,7 +51,7 @@ import {
 import baseline from '../src/core/__fixtures__/baseline.json';
 import statsFixture from '../src/core/__fixtures__/stats.json';
 import qualityFixture from '../src/core/__fixtures__/quality.json';
-import { OTHER_MAIN, heatRowKey, nextSubstatDist, substatHeatmap } from '../src/core/heatmap';
+import { OTHER_MAIN, heatRowKey, nextSubstatDist, substatHeatmap, substatWeights } from '../src/core/heatmap';
 
 const DEAD: SubAttr = '小防御';
 
@@ -777,6 +777,35 @@ describe('逐条抽取的概率（主词条 → 副词条）', () => {
     expect(heatRowKey('爆伤')).toBe('暴伤');
     expect(heatRowKey('火伤')).toBe(OTHER_MAIN);
     expect(heatRowKey('治疗')).toBe(OTHER_MAIN);
+  });
+
+  it('副词条权重表：10 条全在、权重是那张固定的表、不排除时占比合计 100%', () => {
+    const rows = substatWeights();
+    expect(rows.map((d) => d.attr)).toEqual([...SUB_ATTRS]);
+    // 权重与部位无关：就是 stats 里那张表（小生命 / 小攻击 / 小防御 150、暴击 / 暴伤 75……）
+    expect(rows.map((d) => d.weight)).toEqual([150, 150, 150, 100, 100, 100, 75, 75, 100, 100]);
+    expect(rows.every((d) => !d.excluded)).toBe(true);
+    expect(rows.reduce((s, d) => s + d.p, 0)).toBeCloseTo(1, 12);
+    expect(rows[0]!.p).toBeCloseTo(150 / 1100, 12);
+  });
+
+  it('副词条权重表：排除某一条之后其余按剩余权重归一，与「下一条副词条」同一套数', () => {
+    const rows = substatWeights('小生命');
+    // 被排除的那一条留在列表里（界面上柱子还在原处，只是压暗），给的是它原本的占比
+    expect(rows.filter((d) => d.excluded).map((d) => d.attr)).toEqual(['小生命']);
+    const kept = rows.filter((d) => !d.excluded);
+    expect(kept.reduce((s, d) => s + d.p, 0)).toBeCloseTo(1, 12);
+    expect(kept.find((d) => d.attr === '小攻击')!.p).toBeCloseTo(150 / 950, 12);
+    // 与 `nextSubstatDist(该词条)` 逐条一致 —— 两处说的是同一件事
+    for (const d of nextSubstatDist('小生命')) {
+      expect(kept.find((k) => k.attr === d.attr)!.p).toBeCloseTo(d.p, 12);
+    }
+    // 排除「其他」那类不在池子里的词条是不可能的（类型上就传不进来），
+    // 但池子里的每一条都试一遍：合计都是 100%
+    for (const attr of SUB_ATTRS) {
+      const rest = substatWeights(attr).filter((d) => !d.excluded);
+      expect(rest.reduce((s, d) => s + d.p, 0), attr).toBeCloseTo(1, 12);
+    }
   });
 });
 
