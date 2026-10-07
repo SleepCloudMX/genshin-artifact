@@ -452,10 +452,12 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 
 .tab-panel[hidden] { display: none; }
 
-/* 「词条权重」那一页要求**整页不滚动**（作者 2026-10-08）：只收紧**这一页**的面板留白，
-   不动 `.panel` / `.hint` 的默认值 —— 其它页面的留白是作者定的，别顺手改全局。 */
-.tab-panel[data-tab='basic'] .panel { margin-bottom: 10px; }
-.tab-panel[data-tab='basic'] .panel .hint { margin: 2px 0 6px; }
+/* 「词条权重」那一页要求**整页不滚动**（作者 2026-10-08）：只收紧**那两个面板**的留白。
+   **不要**按任务限定（`[data-tab='basic']`）—— 那会连「主词条 × 副词条」那个子 tab
+   一起改掉（作者当场就发现了：「你需要且仅需要调 “词条权重”，你调别的干嘛？」）；
+   也不要动 `.panel` / `.hint` 的默认值。这个类由 `app.ts` 只挂在「词条权重」的两块面板上。 */
+.panel.compact-panel { margin-bottom: 10px; }
+.panel.compact-panel .hint { margin: 2px 0 6px; }
 
 /* ---------- 子 tab（一张图一页，避免上下滚动） ---------- */
 .subtabs {

@@ -1661,6 +1661,9 @@ export function mount(root: HTMLElement): void {
             //    **先把三个格子都挂上、再画**：列数取决于有几个格子（`grid-auto-flow: dense`），
             //    边挂边画时第一张量到的还不是最终宽度，那张图的字号会跟着缩水。
             const p1 = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
+            // 这一页要求不滚动，面板留白收一档 —— **只挂这两个面板**（`.compact-panel`），
+            // 别按任务限定：那会连隔壁「主词条 × 副词条」那个子 tab 一起改掉
+            p1.box.classList.add('compact-panel');
             const stack = node('div', { class: 'chart-stack' });
             // 概率降序：柱状图的读法就是「谁大谁小」，按大小排最省事
             const perPos = POSITIONS.map((pos) => ({
@@ -1710,7 +1713,7 @@ export function mount(root: HTMLElement): void {
 
             // ② 副词条权重：点柱子 = 以它为主词条（再点一次恢复）
             const p2 = panel(C.WEIGHTS_TITLE, C.WEIGHTS_HINT);
-            p2.box.classList.add('flush');
+            p2.box.classList.add('flush', 'compact-panel');
             const chart = node('div', { class: 'chart-wrap', id: 'weightChart' });
             p2.body.append(chart);
             box.append(p2.box);
