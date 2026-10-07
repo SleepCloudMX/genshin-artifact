@@ -32,6 +32,16 @@ export function hasRandomMain(slot: Slot): slot is Position {
   return (POSITIONS as readonly string[]).includes(slot);
 }
 
+/**
+ * 花 / 羽**固定的那个主词条**。
+ *
+ * 生之花的主词条永远是生命值、死之羽永远是攻击力，而且它们**与副词条池同名**：
+ * 花不会掉出「小生命」副词条，羽不会掉出「小攻击」副词条。
+ * 所以这里必须给出词条池里的名字（`小生命` / `小攻击`），
+ * 而不是「生命值」这种只在主词条里出现的写法 —— 前者才能被 `excludedSubstat` 认出来。
+ */
+export const FIXED_MAIN: Record<'花' | '羽', SubAttr> = { 花: '小生命', 羽: '小攻击' };
+
 /** 副词条：与主词条同类，可以成为主词条 */
 export const SUB_ATTRS = [
   '小生命', '小攻击', '小防御',
@@ -189,19 +199,30 @@ export function mainProbAt(position: Position, mainAttr: MainAttr): number | und
   return w / total;
 }
 
-/** 该部位可选的主词条（按权重降序）。花 / 羽的主词条固定，返回空数组 */
+/**
+ * 该部位可选的主词条（按权重降序）。
+ *
+ * **花 / 羽返回的是唯一那一个**（`FIXED_MAIN`），不再是空数组：
+ * 空数组曾经让界面把它当成「没有可选项」而把当前值锁死 ——
+ * 从空之杯（火伤）切到花，下拉里还写着火伤且点不动，模型却拿火伤当花的主词条算。
+ * 只有一个选项 = 该部位的主词条固定，换部位时**强制转**过去。
+ */
 export function mainAttrsOf(slot: Slot): MainAttr[] {
-  if (!hasRandomMain(slot)) return [];
+  if (!hasRandomMain(slot)) return [FIXED_MAIN[slot]];
   return Object.entries(MAIN_WEIGHTS[slot])
     .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
     .map(([attr]) => attr as MainAttr);
 }
 
-/** 给定部位时，哪些副词条不能出现（主词条自己） */
-export function excludedAt(slot: Slot, mainAttr: MainAttr): SubAttr | undefined {
-  // 花 / 羽的主词条是生命值 / 攻击力这种固定值，与副词条池不冲突
-  if (!hasRandomMain(slot)) return undefined;
-  return excludedSubstat(mainAttr);
+/**
+ * 主词条为 `mainAttr` 时，哪些副词条不能出现（= 与主词条同名的那一条）。
+ *
+ * **花 / 羽也适用**：它们的主词条（`小生命` / `小攻击`）就在副词条池里，
+ * 旧版对着两个部位直接返回 `undefined`，于是「花的主词条 = 火伤」这种非法组合
+ * 在副词条池里畅通无阻。
+ */
+export function excludedAt(mainAttr: MainAttr): SubAttr | undefined {
+  return excludedSubstat(canonicalMainAttr(mainAttr));
 }
 
 /** 给定主词条后的可用副词条池（权重表） */

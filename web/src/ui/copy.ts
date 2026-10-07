@@ -36,7 +36,15 @@ export const FIELD_INITIAL = '初始';
 
 /** 花 / 羽的主词条固定，没有可选项 */
 export const MAIN_FIXED = '固定';
-export const MAIN_FIXED_HINT = '生之花与死之羽的主词条固定，没有可选项。';
+export const MAIN_FIXED_HINT =
+  '生之花固定生命值（= 副词条里的小生命）、死之羽固定攻击力（= 小攻击），只有这一种。';
+/**
+ * 换了部位之后，原主词条在新部位不合法。
+ *
+ * 界面**不替用户挑**（作者明说「待用户重新选择」）：下拉标成浅红、值原样留着，
+ * 主词条概率会诚实算成 0（`DROP_OUT_OF_RANGE`）。
+ */
+export const MAIN_INVALID_HINT = '该部位不出这个词条，请重新选择。';
 
 export const SECT_SUBSTATS = '副词条';
 /** 「初始档位」列存在时（得分分布页） */
@@ -117,23 +125,26 @@ export function bucketSizeLabel(size: number): string {
 // 指标卡
 // ---------------------------------------------------------------------------
 
-export const CARD_REACH = '达到概率';
-export function reachNote(target: string): string {
-  return `得分 ≥ ${target}`;
+/**
+ * 「达到概率」这张卡：标签里直接带上目标分数（作者要求「胚子 {目标分数} 分概率」）。
+ *
+ * 卡片里不再重复那个数字，`CARD_REACH_NOTE` 只交代口径是「≥」而不是「=」。
+ */
+export function cardReach(target: string): string {
+  return `胚子 ${target} 分概率`;
 }
-export const CARD_ATTEMPTS = '大致要刷';
-export const CARD_ATTEMPTS_NOTE = '按 1/p 估算，单位「个胚子」';
-export const CARD_BEST = '最高可能分';
-export function scoredSlotsNote(n: number): string {
-  return `计分槽位 ${n}/4`;
-}
+export const CARD_REACH_NOTE = '得分 ≥ 该分数';
 
-/** 掉落概率：不含成长值，只回答「能不能刷到这件胚子」 */
-export const CARD_DROP = '掉落概率';
+/** 前 10% 分数：P(得分 ≥ 该分数) ≤ 10% 的那条分数线 */
+export const CARD_TOP10 = '前 10% 分数';
+export const CARD_TOP10_NOTE = '得分 ≥ 该分数的概率 ≤ 10%';
+
+/** 该部位的胚子概率：不含成长值，只回答「能不能刷到这件胚子」 */
+export const CARD_DROP = '该部位的胚子概率';
 export function dropBreakdown(main: string, subs: string): string {
   return `主词条 ${main} × 副词条 ${subs}`;
 }
-/** 主词条不在该部位的表里（正常操作到不了） */
+/** 主词条不在该部位的表里（切到别的部位后还没重选主词条时就是这个状态） */
 export const DROP_OUT_OF_RANGE = '该部位没有这个主词条';
 
 // ---------------------------------------------------------------------------

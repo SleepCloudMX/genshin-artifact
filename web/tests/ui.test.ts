@@ -260,13 +260,13 @@ describe('默认配置', () => {
   it('选中词条后权重自动取该词条的默认值', () => {
     const root = freshRoot();
     mount(root);
-    // 第 3 行本来是空的
+    // 第 1 行让出暴击，第 3 行才选得到它（已占用的词条不再出现在下拉里）
+    setSelect(attrSelects(root)[0]!, '充能');
     setSelect(attrSelects(root)[2]!, '暴击');
-    // 暴击已被第 1 行占着 → 两条互换；第 1 行拿到空词条、权重 0
-    expect(weightInputs(root)[0]!.value).toBe('0');
     expect(weightInputs(root)[2]!.value).toBe('2');
 
-    setSelect(attrSelects(root)[3]!, '暴伤');
+    // 没有默认口径的词条落到 1（不是 0.1，也不是 0）
+    setSelect(attrSelects(root)[3]!, '精通');
     expect(weightInputs(root)[3]!.value).toBe('1');
   });
 
@@ -306,15 +306,16 @@ describe('权重：− / + 与数字框', () => {
     // 第 4 行空着、权重 0
     expect(weightInputs(root)[3]!.value).toBe('0');
 
-    // 先给它一个暴伤 → 权重自动 1
-    setSelect(attrSelects(root)[3]!, '暴伤');
-    expect(weightInputs(root)[3]!.value).toBe('1');
+    // 先把第 1 行让开，暴击（默认权重 2）才选得到第 4 行
+    setSelect(attrSelects(root)[0]!, '充能');
+    setSelect(attrSelects(root)[3]!, '暴击');
+    expect(weightInputs(root)[3]!.value).toBe('2');
 
-    // 归零后再点 + → 回到默认 1
+    // 归零后再点 + → 回到默认 2
     stepper(root, 3).minus.click();
     expect(weightInputs(root)[3]!.value).toBe('0');
     stepper(root, 3).plus.click();
-    expect(weightInputs(root)[3]!.value).toBe('1');
+    expect(weightInputs(root)[3]!.value).toBe('2');
   });
 
   it('− 从默认权重直接归零', () => {
@@ -386,15 +387,15 @@ describe('权重：− / + 与数字框', () => {
   it('权重框要按回车 / 失焦才提交，打字过程中不动结果', () => {
     const root = freshRoot();
     mount(root);
-    const before = cardValues(root)[3]!; // 最高可能分跟着权重走
+    const before = cardValues(root)[2]!; // 前 10% 分数跟着权重走
     const input = weightInputs(root)[1]!; // 第 2 行：暴伤，权重 1
 
     input.value = '0.25';
     fire(input, 'input');
-    expect(cardValues(root)[3]).toBe(before); // 只是打字，还没提交
+    expect(cardValues(root)[2]).toBe(before); // 只是打字，还没提交
 
     fire(input, 'change'); // 回车 / 失焦
-    expect(cardValues(root)[3]).not.toBe(before);
+    expect(cardValues(root)[2]).not.toBe(before);
     expect(weightInputs(root)[1]!.value).toBe('0.25');
     expect(root.querySelector('.error')).toBeNull();
   });
@@ -562,7 +563,7 @@ describe('主 tab 与子 tab', () => {
   it('切子 tab 后返回，图按当前输入重算', () => {
     const root = freshRoot();
     mount(root);
-    const before = cardValues(root)[3]!;
+    const before = cardValues(root)[2]!;
 
     clickSub(root, C.SUB_SURVIVAL);
     // 在别的子 tab 上改输入
@@ -570,7 +571,7 @@ describe('主 tab 与子 tab', () => {
     clickSub(root, C.SUB_DIST);
 
     expect(visibleSubPanel(root).querySelector('#scoreChart svg')).not.toBeNull();
-    expect(cardValues(root)[3]).not.toBe(before);
+    expect(cardValues(root)[2]).not.toBe(before);
   });
 
   /**
@@ -911,7 +912,7 @@ describe('主 tab 与子 tab', () => {
   it('胚子质量的权重与「得分分布」互不影响，且不乘成长值', () => {
     const root = freshRoot();
     mount(root);
-    const growthBestBefore = cardValues(root)[3]!;
+    const growthTop10Before = cardValues(root)[2]!;
 
     clickTab(root, 'quality');
     const crit = qualityWeightInput(root, '暴击')!;
@@ -921,7 +922,7 @@ describe('主 tab 与子 tab', () => {
     expect(Number(cardValues(root)[2])).toBeGreaterThan(0);
 
     clickTab(root, 'growth');
-    expect(cardValues(root)[3]).toBe(growthBestBefore); // 得分分布没被动过
+    expect(cardValues(root)[2]).toBe(growthTop10Before); // 得分分布没被动过
   });
 
   it('两个 tab 共用部位与主词条', () => {
@@ -1134,14 +1135,40 @@ describe('页面文案', () => {
 describe('得分分布页', () => {
   beforeEach(() => resetUrl());
 
-  it('四张指标卡：掉落概率 / 达到概率 / 大致要刷 / 最高可能分', () => {
+  it('三张指标卡：该部位的胚子概率 / 胚子 30 分概率 / 前 10% 分数', () => {
     const root = freshRoot();
     mount(root);
     const labels = [...root.querySelectorAll('.tab-panel:not([hidden]) .card-label')].map(
       (n) => n.textContent,
     );
-    expect(labels).toEqual([C.CARD_DROP, C.CARD_REACH, C.CARD_ATTEMPTS, C.CARD_BEST]);
-    expect(cardValues(root)).toHaveLength(4);
+    expect(labels).toEqual([C.CARD_DROP, C.cardReach('30.0'), C.CARD_TOP10]);
+    expect(cardValues(root)).toHaveLength(3);
+    // 作者点名删掉的两项：大致要刷（1/p，能从达到概率直接推）与「计分槽位 2/4」
+    const text = root.querySelector('.tab-panel:not([hidden])')!.textContent!;
+    expect(text).not.toContain('大致要刷');
+    expect(text).not.toContain('计分槽位');
+  });
+
+  it('「前 10% 分数」与「分位分数线」子 tab 的 α = 0.1 行同值', () => {
+    const root = freshRoot();
+    mount(root);
+    const shown = cardValues(root)[2]!;
+    clickSub(root, C.SUB_QUANTILE);
+    const rows = [...visibleSubPanel(root).querySelectorAll('tbody tr')].map((r) =>
+      [...r.querySelectorAll('td')].map((c) => c.textContent),
+    );
+    const row = rows.find((c) => c[0] === C.topPercent(0.1))!;
+    expect(row[1]).toBe(shown);
+  });
+
+  it('达到概率卡片的标签里带上目标分数，改目标分数标签跟着变', () => {
+    const root = freshRoot();
+    mount(root);
+    const label = () =>
+      root.querySelectorAll('.tab-panel:not([hidden]) .card-label')[1]!.textContent;
+    expect(label()).toBe(C.cardReach('30.0'));
+    setInput(root.querySelector<HTMLInputElement>('#targetScore')!, '25');
+    expect(label()).toBe(C.cardReach('25.0'));
   });
 
   it('卡片里不再放「目标分数」——它是输入，摆在结果里像算出来的', () => {
@@ -1153,7 +1180,7 @@ describe('得分分布页', () => {
     expect(labels).not.toContain('目标分数');
   });
 
-  it('掉落概率卡片给出概率与「部位 × 主词条 × 副词条」的拆解', () => {
+  it('该部位的胚子概率卡片给出概率与「主词条 × 副词条」的拆解', () => {
     const root = freshRoot();
     mount(root);
     const card = root.querySelector('.tab-panel:not([hidden]) .card')!;
@@ -1163,7 +1190,7 @@ describe('得分分布页', () => {
     expect(card.querySelector('.card-note')!.textContent).toContain('主词条');
   });
 
-  it('掉落概率随要求的副词条增多而下降', () => {
+  it('该部位的胚子概率随要求的副词条增多而下降', () => {
     const root = freshRoot();
     mount(root);
     const dropOf = () =>
@@ -1176,7 +1203,7 @@ describe('得分分布页', () => {
     expect(three).toBeLessThan(two);
   });
 
-  it('掉落概率 = 主词条概率 × 副词条概率', () => {
+  it('该部位的胚子概率 = 主词条概率 × 副词条概率', () => {
     const root = freshRoot();
     mount(root);
     // 空之杯主词条火伤 = 200/4000 = 5%
@@ -1184,27 +1211,83 @@ describe('得分分布页', () => {
     expect(card.querySelector('.card-note')!.textContent).toContain('主词条 5.00%');
   });
 
-  it('切到花 / 羽时主词条固定，且主词条概率为 1', () => {
+  it('切到花 / 羽时主词条**强制转**成该部位唯一的那一条', () => {
     const root = freshRoot();
     mount(root);
+    const mainSel = () => root.querySelector<HTMLSelectElement>('#mainAttr')!;
     setSelect(root.querySelector<HTMLSelectElement>('#slot')!, '花');
-    const sel = root.querySelector<HTMLSelectElement>('#mainAttr')!;
-    expect(sel.disabled).toBe(true);
-    // 主词条固定 → 只剩下副词条的约束，概率不再是 0
+    // 旧版把下拉锁死在「火伤」上（花没有可选项），模型却拿火伤当花的主词条算
+    expect(mainSel().value).toBe('小生命');
+    expect(mainSel().disabled).toBe(true);
+    expect(mainSel().classList.contains('invalid')).toBe(false);
+    expect(root.querySelector('#mainAttrNote')!.hasAttribute('hidden')).toBe(true);
+    // 主词条固定 → 概率 1，只剩副词条的约束，所以不是 0
     expect(cardValues(root)[0]).not.toBe('0%');
     expect(root.querySelector('.tab-panel:not([hidden]) .card-note')!.textContent).toContain(
       '主词条 100.00%',
     );
+
+    setSelect(root.querySelector<HTMLSelectElement>('#slot')!, '羽');
+    expect(mainSel().value).toBe('小攻击');
   });
 
-  it('主词条火伤、暴击2暴伤1、4 词条时最高分是 54.5', () => {
+  it('花的主词条是小生命 → 小生命不能当副词条（主词条自己不在池子里）', () => {
     const root = freshRoot();
     mount(root);
-    // 暴击 2（四档 2.72~3.89）+ 暴伤 1（5.44~7.77），5 次成长全给暴击：
-    // 6 × 3.89 × 2 + 1 × 7.77 = 54.45 → 四舍五入 54.5
-    // （用游戏内显示值会算成 6 × 3.9 × 2 + 7.8 = 54.6，偏高 0.1）
-    expect(cardValues(root)[3]).toBe('54.5');
-    expect(root.querySelector('.summary')).toBeNull(); // 概览句已删
+    setSelect(root.querySelector<HTMLSelectElement>('#slot')!, '花');
+    for (const sel of attrSelects(root)) {
+      expect([...sel.options].map((o) => o.value)).not.toContain('小生命');
+    }
+  });
+
+  it('换到别的部位后原主词条不合法时：标浅红、值留着、等用户重新选', () => {
+    const root = freshRoot();
+    mount(root);
+    // 空之杯 + 火伤 → 换到时之沙（沙不出火伤）
+    setSelect(root.querySelector<HTMLSelectElement>('#slot')!, '沙');
+    const sel = root.querySelector<HTMLSelectElement>('#mainAttr')!;
+    expect(sel.value).toBe('火伤'); // 不替用户挑一个
+    expect(sel.classList.contains('invalid')).toBe(true);
+    expect(sel.disabled).toBe(false); // 还能改
+    expect(sel.title).toBe(C.MAIN_INVALID_HINT);
+    expect(root.querySelector('#mainAttrNote')!.textContent).toBe(C.MAIN_INVALID_HINT);
+    expect(root.querySelector('#mainAttrNote')!.hasAttribute('hidden')).toBe(false);
+    // 概率诚实地算成 0，并说明原因
+    expect(cardValues(root)[0]).toBe('0%');
+    expect(root.querySelector('.tab-panel:not([hidden]) .card-note')!.textContent).toBe(
+      C.DROP_OUT_OF_RANGE,
+    );
+
+    // 重新选一个合法的 → 红色标记消失
+    setSelect(sel, '充能');
+    const after = root.querySelector<HTMLSelectElement>('#mainAttr')!;
+    expect(after.classList.contains('invalid')).toBe(false);
+    expect(after.hasAttribute('title')).toBe(false);
+    expect(root.querySelector('#mainAttrNote')!.hasAttribute('hidden')).toBe(true);
+    expect(Number(cardValues(root)[0]!.replace('%', ''))).toBeGreaterThan(0);
+  });
+
+  it('副词条下拉里不再列出别的槽位已经选走的词条', () => {
+    const root = freshRoot();
+    mount(root);
+    // 默认第 1、2 行是暴击 / 暴伤
+    const sels = attrSelects(root);
+    const third = [...sels[2]!.options].map((o) => o.value);
+    expect(third).not.toContain('暴击');
+    expect(third).not.toContain('暴伤');
+    expect(third).toContain('充能');
+    // 自己那一行占着的词条仍在（否则下拉的当前值对不上 state）
+    expect([...sels[0]!.options].map((o) => o.value)).toContain('暴击');
+  });
+
+  it('前 10% 分数：目标分数不影响它，权重才影响', () => {
+    const root = freshRoot();
+    mount(root);
+    const before = cardValues(root)[2]!;
+    setInput(root.querySelector<HTMLInputElement>('#targetScore')!, '40');
+    expect(cardValues(root)[2]).toBe(before);
+    stepper(root, 0).minus.click(); // 暴击权重 2 → 0，分布变了
+    expect(cardValues(root)[2]).not.toBe(before);
   });
 
   it('切换词条数会改变可达到的命中档位', () => {

@@ -209,6 +209,18 @@ select:focus-visible, input:focus-visible, button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* 主词条与当前部位不匹配（换部位后还没重选）：整条下拉标成浅红等人重选。
+   用半透明红叠在两种主题上都能看：浅色下是淡粉底 + 红边，深色下是暗红底 + 红边。 */
+/* 主词条固定（花 / 羽）时整条下拉不可改：压暗一点，让人看出「不是没得选，是只能这样」 */
+select:disabled {
+  color: var(--text-dim);
+  background: var(--bg-soft);
+  cursor: not-allowed;
+}
+select.invalid {
+  background: rgb(217 45 32 / 9%);
+  border-color: rgb(217 45 32 / 55%);
+}
 
 /* 副词条表：词条 / 权重 / 初始档位 三列；
    `two-col` 用于不需要档位列的任务，`three-col` 是「词条 / 权重 / ×」 */
@@ -305,6 +317,7 @@ button.ghost.add-row:disabled:hover { background: var(--bg-elev); }
 
 .hint { font-size: 12.5px; color: var(--text-dim); margin: 4px 0 10px; }
 .hint.warn { color: var(--warn); margin: 2px 0 6px; }
+.hint.err { color: var(--err); margin: 2px 0 6px; }
 .hint:empty { display: none; }
 .hint b { color: var(--text); }
 

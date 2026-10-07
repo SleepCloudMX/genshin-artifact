@@ -45,7 +45,6 @@ import {
   hitMixAtLeast,
   probAtLeast,
   survival,
-  expectedAttempts,
   scoreAtAlpha,
   tierLabel,
   type DistributionTable,
@@ -356,30 +355,39 @@ export function mount(root: HTMLElement): void {
   /**
    * 换上新的主词条后，把「与它同名的副词条」从两份配置里剔掉。
    *
-   * 两份配置各认各的口径，因为它们各自喂给不同的 core：
-   *   - 槽位（得分分布）按**部位**判定 —— 花 / 羽的主词条是固定值，不参与这个模型
-   *     （`excludedAt`，与 `toSpec` 一致）；
-   *   - 权重表（胚子质量）只看主词条本身（`excludedSubstat`，与 `qualityAttrs` 一致）。
+   * 两份配置各认各的口径，但它们此刻要剔的是同一条：主词条自己。
+   *   - 槽位（得分分布）：`excludedAt(主词条)` —— 花 / 羽也一样（花不出小生命、羽不出小攻击）；
+   *   - 权重表（胚子质量）：`excludedSubstat`，与 `core/quality.ts` 的 `qualityAttrs` 一致。
    *
    * 不剔的话，界面上会留着一行「计分」的非法词条，而 core 那边悄悄把它丢掉 ——
    * 卡片上的「有效词条 N 条」和表里的行数就对不上了。
    */
   function withoutConflicts(mainAttr: MainAttr): Pick<AppState, 'slots' | 'rows'> {
-    const badSlot = excludedAt(state.slot, mainAttr);
+    const bad = excludedAt(mainAttr);
     const slots = state.slots.map((s) =>
-      s.attr !== '' && s.attr === badSlot ? { ...s, attr: '' as const, weight: 0 } : { ...s },
+      s.attr !== '' && s.attr === bad ? { ...s, attr: '' as const, weight: 0 } : { ...s },
     ) as AppState['slots'];
 
     // 词条表：**整行删掉**（不是清成空行）—— 这一行已经不可能成立了，留着只是噪音
-    const badRow = excludedSubstat(mainAttr);
-    const rows = state.rows.filter((r) => r.attr === '' || r.attr !== badRow);
+    const rows = state.rows.filter((r) => r.attr === '' || r.attr !== bad);
     return { slots, rows };
   }
 
-  /** 主词条下拉：可选项由**部位**限定（火伤只有杯能出） */
+  /**
+   * 主词条下拉：可选项由**部位**限定（火伤只有杯能出）。
+   *
+   * 两条口径（作者 2026-10-08 定的）：
+   *   1. **花 / 羽只有一个主词条**，换过去就直接转成它（旧版把下拉锁死在旧值上，
+   *      于是「杯里选火伤 → 切到花」会拿火伤当花的主词条算，副词条池也不对）；
+   *   2. 沙 / 杯 / 头 之间切换时，原主词条可能在新部位不合法 —— 那时**不替用户挑**，
+   *      把下拉标成浅红、把当前值原样显示出来，等用户重新选。
+   */
   function mainAttrField(): { box: HTMLElement; sync(): void } {
     const sel = node('select', { id: 'mainAttr' });
-    let bound: ArtifactSlot | null = null;
+    const note = node('p', { class: 'hint err', id: 'mainAttrNote' });
+    note.hidden = true;
+    /** 选项的重建键：部位 + 当前值合不合法（不合法时要把它作为一项列出来） */
+    let bound = '';
 
     sel.addEventListener('change', () => {
       if (sel.disabled) return;
@@ -389,26 +397,32 @@ export function mount(root: HTMLElement): void {
 
     function sync(): void {
       const mains = mainAttrsOf(state.slot);
-      // 选项只跟部位有关；部位没变就不用重建，避免打断用户正在操作的下拉
-      if (bound !== state.slot) {
-        bound = state.slot;
+      // 花 / 羽：该部位只有一个主词条 → 固定
+      const fixed = mains.length === 1;
+      const valid = mains.includes(state.mainAttr);
+      const key = `${state.slot}|${valid ? '' : state.mainAttr}`;
+      if (bound !== key) {
+        bound = key;
         sel.replaceChildren();
-        if (mains.length === 0) {
-          // 花 / 羽的主词条固定，没有可选的
-          sel.append(option(state.mainAttr, state.mainAttr, true));
-          sel.disabled = true;
-          sel.title = C.MAIN_FIXED_HINT;
-        } else {
-          sel.disabled = false;
-          sel.removeAttribute('title');
-          for (const a of mains) sel.append(option(a, a, a === state.mainAttr));
-        }
+        for (const a of mains) sel.append(option(a, a, a === state.mainAttr));
+        // 不合法的当前值也要列出来，否则下拉显示不出它（用户就看不到自己选的是什么）
+        if (!valid) sel.append(option(state.mainAttr, state.mainAttr, true));
       }
-      sel.value = mains.length === 0 || mains.includes(state.mainAttr) ? state.mainAttr : mains[0]!;
+      sel.disabled = fixed;
+      sel.classList.toggle('invalid', !valid);
+      sel.value = state.mainAttr;
+      if (!valid) sel.title = C.MAIN_INVALID_HINT;
+      else if (fixed) sel.title = C.MAIN_FIXED_HINT;
+      else sel.removeAttribute('title');
+      note.textContent = valid ? '' : C.MAIN_INVALID_HINT;
+      note.hidden = valid;
     }
 
+    const box = node('label', { class: 'field' });
+    box.append(node('span', {}, C.FIELD_MAIN), sel, note);
+
     sync();
-    return { box: field(C.FIELD_MAIN, sel), sync };
+    return { box, sync };
   }
 
   /** 部位下拉：决定主词条的可选项，也决定主词条概率 */
@@ -420,9 +434,10 @@ export function mount(root: HTMLElement): void {
     sel.addEventListener('change', () => {
       const slot = sel.value as ArtifactSlot;
       const mains = mainAttrsOf(slot);
-      // 换部位后原主词条可能不合法 → 落到该部位权重最高的那个
-      const mainAttr =
-        mains.length === 0 || mains.includes(state.mainAttr) ? state.mainAttr : mains[0]!;
+      // 花 / 羽只有一个主词条 → **强制转**过去；
+      // 沙 / 杯 / 头 之间切换时保留原值（可能不合法，界面标红等用户重选，见 mainAttrField）。
+      // 旧版反过来：花 / 羽锁死不动，沙 / 杯 / 头 却悄悄替用户挑一个。
+      const mainAttr = mains.length === 1 ? mains[0]! : state.mainAttr;
       setState({ slot, mainAttr, ...withoutConflicts(mainAttr) });
     });
 
@@ -488,7 +503,9 @@ export function mount(root: HTMLElement): void {
           // 选中一个词条就给它权重初值（暴击 → 2，其余 → 1），取消则清零
           cur.weight = weightOnSelect(attr);
 
-          // 同一个词条只能占一个槽位：改成一个已被占用的词条时，两条互换
+          // 同一个词条只能占一个槽位。界面上已经选不到重复的词条了，
+          // 但分享链接里的槽位是原样读进来的（两个人手改的链接可能带重复），
+          // 所以这里保留一条兜底：真撞上了就让两条互换。
           const dup = slots.findIndex((s, i) => i !== idx && s.attr === attr);
           if (attr !== '' && dup >= 0) {
             const other = slots[dup]!;
@@ -546,7 +563,13 @@ export function mount(root: HTMLElement): void {
 
         const sel = node('select', { 'data-slot': String(i), 'data-key': 'attr' });
         sel.append(option('', C.NOT_SCORED, slot.attr === ''));
-        for (const a of allowed) sel.append(option(a, a, a === slot.attr));
+        // 一个词条只能占一个槽位：**已经被别的槽位选走的词条不再列出来**
+        // （作者：列出来却点不了是反人类设计）。自己的那一项留着，否则下拉显示不出当前值。
+        const taken = state.slots.filter((_, k) => k !== i).map((s) => s.attr);
+        for (const a of allowed) {
+          if (a !== slot.attr && taken.includes(a)) continue;
+          sel.append(option(a, a, a === slot.attr));
+        }
         // 词条可能已不可选（主词条被改成同名词条），退回「不计分」，
         // 与 toSpec 对冲突词条的处理一致
         sel.value = allowed.includes(slot.attr as SubAttr) ? slot.attr : '';
@@ -1201,7 +1224,7 @@ export function mount(root: HTMLElement): void {
       host.append(bar, panels);
 
       this.update = () => {
-        const { spec, scoredCount } = toSpec(state);
+        const { spec } = toSpec(state);
         try {
           table = scoreDistribution(spec);
         } catch (err) {
@@ -1226,10 +1249,10 @@ export function mount(root: HTMLElement): void {
         );
 
         const p = probAtLeast(table, state.targetScore);
-        const attempts = expectedAttempts(table, state.targetScore);
-        const best = table.scores[table.scores.length - 1] ?? 0;
+        // 「前 10% 分数」：概率从高到低累积到 10% 时的那条分数线（与「分位分数线」子 tab 同一口径）
+        const top10 = scoreAtAlpha(table, 0.1);
 
-        // 掉落概率：不含成长值，只回答「能不能刷到这件胚子」。
+        // 该部位的胚子概率：不含成长值，只回答「能不能刷到这件胚子」。
         // 用「得分分布」那套计分词条 —— 这张卡在这一页，问的就是这一页要的词条。
         const drop = dropProbability(
           { mainAttr: state.mainAttr, weights: growthWeights(state) },
@@ -1242,9 +1265,16 @@ export function mount(root: HTMLElement): void {
 
         cards.replaceChildren(
           card(C.CARD_DROP, pct(drop.p), dropNote),
-          card(C.CARD_REACH, pct(p), C.reachNote(fmtScore(state.targetScore))),
-          card(C.CARD_ATTEMPTS, attempts ? oneIn(attempts) : '—', C.CARD_ATTEMPTS_NOTE),
-          card(C.CARD_BEST, fmtScore(best), C.scoredSlotsNote(scoredCount)),
+          card(
+            C.cardReach(fmtScore(state.targetScore)),
+            pct(p),
+            C.CARD_REACH_NOTE,
+          ),
+          card(
+            C.CARD_TOP10,
+            top10 === undefined ? '—' : `${fmtScore(top10)} 分`,
+            top10 === undefined ? C.QUANTILE_OUT_OF_RANGE : C.CARD_TOP10_NOTE,
+          ),
         );
         sub.refresh();
       };

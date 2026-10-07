@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import {
   SLOTS,
   SUB_ATTRS,
+  FIXED_MAIN,
+  excludedAt,
   hasRandomMain,
   mainAttrsOf,
   mainProbAt,
@@ -394,13 +396,19 @@ describe('派生指标', () => {
 // 掉落概率（不含成长值）
 // ---------------------------------------------------------------------------
 describe('部位与主词条', () => {
-  it('五个部位，花与羽的主词条固定', () => {
+  it('五个部位，花与羽的主词条固定在那一条上', () => {
     expect(SLOTS).toEqual(['花', '羽', '沙', '杯', '头']);
     expect(hasRandomMain('花')).toBe(false);
     expect(hasRandomMain('羽')).toBe(false);
     expect(hasRandomMain('沙')).toBe(true);
-    expect(mainAttrsOf('花')).toEqual([]);
-    expect(mainAttrsOf('羽')).toEqual([]);
+    // 固定 ≠ 没有：换到花就要**强制转**成小生命（旧版返回空数组，界面把下拉锁死在旧值上）
+    expect(mainAttrsOf('花')).toEqual([FIXED_MAIN['花']]);
+    expect(mainAttrsOf('羽')).toEqual([FIXED_MAIN['羽']]);
+    expect(mainAttrsOf('花')).toEqual(['小生命']);
+    // 花的主词条在副词条池里 → 副词条不再出小生命；羽同理
+    expect(excludedAt('小生命')).toBe('小生命');
+    expect(excludedAt('小攻击')).toBe('小攻击');
+    expect(excludedAt('火伤')).toBeUndefined();
   });
 
   it('主词条可选项按部位限定', () => {
@@ -677,6 +685,23 @@ describe('成长值口径（四舍五入到两位小数）', () => {
   it('3 词条的满档是 5 次成长（第 1 次用于激活第 4 条）', () => {
     const t = singleSlot('暴伤', 3);
     expect(t.scores[t.scores.length - 1]).toBe(38.9); // 5 × 7.77 = 38.85 → 38.9
+  });
+
+  it('默认口径（暴击 2 / 暴伤 1、4 词条）的最高分是 54.5', () => {
+    // 5 次成长全给暴击：6 × 3.89 × 2 + 1 × 7.77 = 54.45 → 54.5
+    // （用游戏内显示值会算成 6 × 3.9 × 2 + 7.8 = 54.6，偏高 0.1）
+    // 这条原先挂在界面的「最高可能分」卡片上，那张卡已被作者换成「前 10% 分数」，
+    // 所以搬到这里守着同一个口径。
+    const t = scoreDistribution({
+      slots: [
+        { attr: '暴击', weight: 2, initialRoll: 'random' },
+        { attr: '暴伤', weight: 1, initialRoll: 'random' },
+        { attr: DEAD, weight: 0, initialRoll: 'random' },
+        { attr: DEAD, weight: 0, initialRoll: 'random' },
+      ] as unknown as ArtifactSpec['slots'],
+      initialVisible: 4,
+    });
+    expect(t.scores[t.scores.length - 1]).toBe(54.5);
   });
 });
 

@@ -345,7 +345,7 @@ export interface SpecResult {
  * - 权重非法时**忽略该词条**而不是抛错：输入框可能正处在中间状态（空串、`-`）。
  */
 export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
-  const excluded = excludedAt(state.slot, state.mainAttr);
+  const excluded = excludedAt(state.mainAttr);
   const ignored: SubAttr[] = [];
   const usable: { attr: SubAttr; weight: number; initialRoll: InitialRoll }[] = [];
 
@@ -483,10 +483,9 @@ export function fromQuery(search: string): AppState {
       : fallback.slot;
     // 主词条必须在**该部位**可选：老链接（没有 slot）或手改的链接都可能不合法。
     // 回落目标不是 fallback.mainAttr（它属于另一个部位，可能同样不合法），
-    // 而是该部位权重最高的那个。花 / 羽没有可选项，不做限制。
+    // 而是该部位权重最高的那个；花 / 羽只有一个选项，于是链接里的主词条被强制转过去。
     const mains = mainAttrsOf(slot);
-    const mainAttr: MainAttr =
-      mains.length === 0 || mains.includes(main) ? main : mains[0]!;
+    const mainAttr: MainAttr = mains.includes(main) ? main : mains[0]!;
 
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
