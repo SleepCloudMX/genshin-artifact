@@ -452,10 +452,10 @@ svg.chart { display: block; width: 100%; height: auto; }
 :root[data-theme='dark'] .hover-dot { stroke: #6ea8fe; }
 .hover-dot.on { opacity: 1; }
 
-/* 环形图：名字与百分比画在图上（画布是横的，左右留出标签位），所以比面板窄 */
+/* 环形图：名字画在图外（画布是横的），百分比画在圆环里，所以比面板窄 */
 .pie-wrap { display: block; }
 .pie-box { display: flex; justify-content: center; }
-svg.pie { width: 100%; max-width: 560px; height: auto; }
+svg.pie { width: 100%; max-width: 700px; height: auto; }
 .pie-slice {
   stroke: var(--bg-elev);
   stroke-width: .6;
@@ -466,18 +466,38 @@ svg.pie:has(.pie-slice:hover) .pie-slice { opacity: .45; }
 svg.pie .pie-slice:hover { opacity: 1; }
 /* 摘出来的那一块：描边加深一点，配合外移的缺口一眼可辨 */
 .pie-slice.exploded { stroke: var(--text-faint); stroke-width: .8; }
-.pie-leader { fill: none; stroke: var(--border-strong); stroke-width: .5; }
-.pie-label { fill: var(--text); font-size: 3.1px; }
+.pie-leader { fill: none; stroke: var(--border-strong); stroke-width: .35; }
+.pie-label { fill: var(--text); font-size: 3.2px; }
 .pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }
 
-/* 质量分布（详细）：柱内标注 + 累计概率曲线 */
+/* 质量分布（详细）：柱内标注 + 累计概率曲线 + 勾选高亮 */
 .seg-label { fill: #fff; font-size: 9.5px; font-weight: 600; }
 .seg-pct { fill: rgb(255 255 255 / 82%); font-size: 9px; font-family: var(--mono); }
+/* 勾选的词条：命中的段留着原色并描一圈橙色（参考图的高亮色），其余压暗。
+   压暗比「把命中段换个颜色」更能看出「哪些段属于它」，也不会毁掉
+   「段色 = 几条有效词条」这套编码。描边用橙色，是因为它在 5 个段色上都看得见
+   （用主题蓝会在蓝色的「1 条」段上消失）。 */
+.bar-seg.seg-dim, .seg-label.seg-dim, .seg-pct.seg-dim { opacity: .2; }
+.bar-seg.seg-hit { stroke: #ff8c00; stroke-width: 2; }
 .cum-line { fill: none; stroke: #e74c3c; stroke-width: 2; }
 .cum-dot { fill: #e74c3c; }
 .cum-guide { stroke: #e74c3c; stroke-width: .6; stroke-dasharray: 3 4; opacity: .3; }
 .cum-label { fill: #e74c3c; font-size: 10px; font-family: var(--mono); }
 .cum-title { fill: #e74c3c; font-size: 11px; }
+
+/* 图内工具条上的勾选框（「质量分布（详细）」用） */
+.chart-tools.checks { gap: 4px 14px; }
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.check input { accent-color: var(--accent); margin: 0; }
+.check:hover { color: var(--text); }
 
 /* ---------- 浮框 ---------- */
 .tooltip-host { position: fixed; inset: 0; pointer-events: none; z-index: 50; }

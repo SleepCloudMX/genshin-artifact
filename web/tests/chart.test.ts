@@ -30,6 +30,11 @@ function makeTooltip(): Tooltip {
   return new Tooltip(host);
 }
 
+/** 子串出现次数：浮框里同一个数只许出现一次 */
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
+
 function makeData(bars: number) {
   return Array.from({ length: bars }, (_, i) => ({
     score: 10 + i * 0.1,
@@ -175,6 +180,12 @@ describe('得分分布堆叠柱', () => {
     const badge = head.querySelector('.tt-badge')!;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toMatch(/%$/);
+  });
+
+  it('浮框不再有「第 N / M 根柱子」这类脚注 —— 竖线已经指出位置了', () => {
+    const { host } = hoverBar(makeData(5), 2);
+    expect(host.querySelector('.tooltip .tt-foot')).toBeNull();
+    expect(host.querySelector('.tooltip')!.textContent).not.toContain('第 ');
   });
 
   it('图上不再另设概率角标（概率只在浮框里）', () => {
@@ -338,8 +349,7 @@ describe('生存曲线（独立成图）', () => {
     return host.querySelector('.tooltip') as HTMLElement;
   }
 
-  it('浮框里画出「≥ 该分数时命中次数」的横排柱状图', () => {
-    const scores = [10, 11, 12, 13];
+  it('浮框里画出「≥ 该分数时命中次数」的横排柱状图', () => {    const scores = [10, 11, 12, 13];
     const surv = [1, 0.6, 0.25, 0.04];
     // 第 2 列：命中 1 次 0.5 / 命中 3 次 0.5（0 的不画）
     const mix = [0, 0.5, 0, 0.5, 0, 0];
@@ -369,9 +379,18 @@ describe('生存曲线（独立成图）', () => {
     expect(fill.style.background).not.toBe('');
   });
 
+  it('浮框不抄一遍图名的公式：没有副标题，也没有「曲线越靠右越低」这种废话', () => {
+    const node = hoverCol({ scores: [10, 11], survival: [1, 0.5], title: 't' }, 1);
+    // 概率在 badge 里；标题只说「哪条线」
+    expect(node.querySelector('.tt-title')!.textContent).toBe('11.0 分及以上');
+    expect(node.querySelector('.tt-badge')!.textContent).toBe('50.00%');
+    expect(node.querySelector('.tt-sub')).toBeNull();
+    expect(node.querySelector('.tt-foot')).toBeNull();
+    expect(node.textContent).not.toContain('P(得分 ≥ 11.0)');
+  });
+
   it('不给 hitMix 就不画柱状图（其他图共用同一个浮框组件）', () => {
-    const node = hoverCol({ scores: [10, 11], survival: [1, 0.5], title: 't' }, 0);
-    expect(node.querySelectorAll('.tt-bar')).toHaveLength(0);
+    const node = hoverCol({ scores: [10, 11], survival: [1, 0.5], title: 't' }, 0);    expect(node.querySelectorAll('.tt-bar')).toHaveLength(0);
     expect(node.querySelector('.tt-chart')).toBeNull();
   });
 
@@ -398,16 +417,40 @@ describe('分类柱状图', () => {
     expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(3);
     expect(svg.querySelectorAll('rect.hot-rect')).toHaveLength(3);
   });
+
+  it('浮框：数值进 badge（纵轴已经是概率），标题可另给带单位的写法', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(
+      renderHistogram({
+        items: [{ label: '4.0', title: '4.0 分', value: 0.1315, rows: [{ label: '暴击', value: '13.15%' }] }],
+        title: 't',
+        tooltip,
+      }),
+    );
+    host
+      .querySelectorAll('rect.hot-rect')[0]!
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    const tt = host.querySelector('.tooltip')!;
+    expect(tt.querySelector('.tt-title')!.textContent).toBe('4.0 分');
+    expect(tt.querySelector('.tt-badge')!.textContent).toBe('13.15%');
+    // 不再有一行叫「概率」的（纵轴就是概率），也不再有「说明」这种占位标签
+    expect(tt.textContent).not.toContain('概率');
+    expect(tt.textContent).not.toContain('说明');
+    expect(occurrences(tt.textContent!, '13.15%')).toBe(2); // badge + 「暴击」那一行
+  });
 });
 
 describe('质量分布（详细）', () => {
-  const bars = [
+  type Bars = Parameters<typeof renderQualityStacked>[0]['bars'];
+  const bars: Bars = [
     {
       score: 0,
       total: 0.3,
       atLeast: 1,
       segments: [
-        { label: '无有效词条', size: 0, p: 0.3 },
+        { label: '无有效词条', attrs: [], size: 0, p: 0.3 },
       ],
     },
     {
@@ -415,9 +458,9 @@ describe('质量分布（详细）', () => {
       total: 0.5,
       atLeast: 0.7,
       segments: [
-        { label: '暴击', size: 1, p: 0.3 },
-        { label: '暴击 + 精通', size: 2, p: 0.15 },
-        { label: '暴击 + 精通 + 大攻击', size: 3, p: 0.05 },
+        { label: '暴击', attrs: ['暴击'], size: 1, p: 0.3 },
+        { label: '暴击 + 精通', attrs: ['暴击', '精通'], size: 2, p: 0.15 },
+        { label: '暴击 + 精通 + 大攻击', attrs: ['暴击', '精通', '大攻击'], size: 3, p: 0.05 },
       ],
     },
     {
@@ -425,7 +468,12 @@ describe('质量分布（详细）', () => {
       total: 0.2,
       atLeast: 0.2,
       segments: [
-        { label: '暴击 + 精通 + 大攻击 + 暴伤', size: 4, p: 0.2 },
+        {
+          label: '暴击 + 精通 + 大攻击 + 暴伤',
+          attrs: ['暴击', '精通', '大攻击', '暴伤'],
+          size: 4,
+          p: 0.2,
+        },
       ],
     },
   ];
@@ -473,7 +521,7 @@ describe('质量分布（详细）', () => {
     expect(svg.querySelector('line.guide')).not.toBeNull();
   });
 
-  it('悬停给出该分数的组合明细与累计概率', () => {
+  it('悬停给出该分数的组合明细，且不重复合计与累计', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
@@ -484,11 +532,39 @@ describe('质量分布（详细）', () => {
 
     const tt = host.querySelector('.tooltip')!;
     expect(tt.querySelector('.tt-title')!.textContent).toBe('3 分');
-    expect(tt.querySelector('.tt-badge')!.textContent).toBe('50.00%');
+    const badge = tt.querySelector('.tt-badge')!.textContent!;
+    expect(badge).toBe('50.00%');
     const rows = [...tt.querySelectorAll('.tt-row')].map((r) => r.textContent);
     expect(rows.some((t) => t!.includes('暴击 + 精通'))).toBe(true);
-    expect(rows.some((t) => t!.includes('本分数合计'))).toBe(true);
-    expect(tt.textContent).toContain('P(得分 ≥ 3) = 70.00%');
+
+    // 作者点名：「本分数合计」与右上角的 badge 是同一个数，不许再出现
+    expect(tt.textContent).not.toContain('本分数合计');
+    // 累计概率已经标在右轴上，浮框里不再抄一遍
+    expect(tt.textContent).not.toContain('P(得分 ≥');
+    // 同一个数在浮框里只出现一次
+    expect(occurrences(tt.textContent!, badge)).toBe(1);
+  });
+
+  it('勾选的词条：命中的段挑出来，其余压暗', () => {
+    const svg = renderQualityStacked({ bars, highlight: ['暴击'], tooltip: makeTooltip() });
+    const hits = svg.querySelectorAll('rect.bar-seg.seg-hit');
+    const dim = svg.querySelectorAll('rect.bar-seg.seg-dim');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(dim.length).toBeGreaterThan(0);
+    expect(hits.length + dim.length).toBe(svg.querySelectorAll('rect.bar-seg').length);
+    // 含暴击的段：第 2 根柱子 3 段 + 第 3 根柱子那一段（4 条全齐）
+    expect(hits.length).toBe(4);
+  });
+
+  it('勾两个词条 = 同时含这两条才算命中（与参考实现的 issubset 一致）', () => {
+    const svg = renderQualityStacked({ bars, highlight: ['暴击', '精通'], tooltip: makeTooltip() });
+    // 暴击+精通、暴击+精通+大攻击、暴击+精通+大攻击+暴伤
+    expect(svg.querySelectorAll('rect.bar-seg.seg-hit')).toHaveLength(3);
+  });
+
+  it('不勾选时不高亮也不压暗', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('.seg-hit, .seg-dim')).toHaveLength(0);
   });
 
   it('空数据不抛错', () => {
@@ -518,17 +594,62 @@ describe('环形图', () => {
     expect(svg.querySelectorAll('path.pie-slice')).toHaveLength(3);
   });
 
-  it('每块都有图内标注：折线 + 名字 + 百分比', () => {
+  it('每块都有图内标注：折线 + 名字，百分比写在圆环里', () => {
     const svg = renderPie({ items, title: 't', tooltip: makeTooltip() });
     expect(svg.querySelectorAll('polyline.pie-leader')).toHaveLength(3);
     expect(svg.querySelectorAll('text.pie-label')).toHaveLength(3);
     const pcts = [...svg.querySelectorAll('text.pie-pct')].map((n) => n.textContent);
-    expect(pcts).toEqual(['40.00%', '30.00%', '30.00%']);
+    expect(pcts.sort()).toEqual(['30.00%', '30.00%', '40.00%']);
     expect([...svg.querySelectorAll('text.pie-label')].map((n) => n.textContent)).toEqual([
       '暴击 + 暴伤',
       '暴伤 + 大攻击',
       '其他 8 种组合',
     ]);
+    // 宽度够的扇区：百分比画在圆环里（半径约 0.8R），不占图外的位置
+    const center = 90;
+    for (const t of svg.querySelectorAll('text.pie-pct')) {
+      const d = Math.hypot(Number(t.getAttribute('x')) - center, Number(t.getAttribute('y')) - 55);
+      expect(d).toBeGreaterThan(15);
+      expect(d).toBeLessThan(30);
+    }
+  });
+
+  it('起点固定在左上角：第一块从 140° 开始铺', () => {
+    const one = renderPie({ items: [{ label: 'a', p: 1 }], title: 't', tooltip: makeTooltip() });
+    // 整圆看不出起点，用两块：第一块占四分之一，它的中缝应在 140 + 45 = 185°（正左偏下）
+    const two = renderPie({
+      items: [
+        { label: 'a', p: 0.25 },
+        { label: 'b', p: 0.75 },
+      ],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    expect(one.querySelectorAll('path.pie-slice')).toHaveLength(1);
+    // 起点在左上：从 140° 铺 90° 的扇区，「a」的首个顶点应落在中心的左上象限
+    const first = two.querySelector('path.pie-slice')!.getAttribute('d')!;
+    const m = /^M([\d.]+),([\d.]+)/.exec(first)!;
+    expect(Number(m[1])).toBeLessThan(90); // 在竖直中线左侧
+    expect(Number(m[2])).toBeLessThan(55); // 在水平中线之上
+  });
+
+  it('窄到写不下百分比的扇区，把百分比写到图外第二行', () => {
+    const svg = renderPie({
+      items: [
+        { label: '大块', p: 0.98 },
+        { label: '大攻击 + 暴击 + 暴伤 + 精通', p: 0.02, explode: true },
+      ],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    // 两块都各有一个百分比文字，只是位置不同：窄的那块在环外（半径 > R）
+    const pcts = [...svg.querySelectorAll('text.pie-pct')];
+    expect(pcts).toHaveLength(2);
+    const radius = (n: Element): number =>
+      Math.hypot(Number(n.getAttribute('x')) - 90, Number(n.getAttribute('y')) - 55);
+    const outside = pcts.filter((n) => radius(n) > 30);
+    expect(outside).toHaveLength(1);
+    expect(outside[0]!.textContent).toBe('2.00%');
   });
 
   it('explode 的那一块真的被移开了，并带标记', () => {

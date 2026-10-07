@@ -12,6 +12,7 @@
  * 交互：所有图共用一个浮框（`Tooltip`），悬停时高亮整列并移动辅助线。
  */
 
+import type { SubAttr } from '../core/stats';
 import { pct, pctTick } from '../ui/format';
 import { Tooltip, type TooltipBar, type TooltipRow } from './tooltip';
 
@@ -419,9 +420,9 @@ function scoreTooltip(
   d: StackedDatum,
   total: number,
   hitLabels: string[],
-  i: number,
-  count: number,
-): { title: string; badge: string; rows: TooltipRow[]; footer?: string } {
+  _i: number,
+  _count: number,
+): { title: string; badge: string; rows: TooltipRow[] } {
   // 只有一根柱子时不必说「占本柱的 100%」——那是废话
   const only = d.byHit.filter((p) => p > 0).length === 1;
   const rows: TooltipRow[] = [];
@@ -437,14 +438,12 @@ function scoreTooltip(
   }
 
   const bucketed = d.range !== undefined && d.range.min !== d.range.max;
+  // 标题只交代「这是哪一根」，概率在右上角的 badge 里。
+  // **不要**再加「第 N / M 根柱子」这类脚注：竖线已经指出位置了。
   return {
     title: bucketed ? bucketRangeLabel(d) : `${d.score.toFixed(1)} 分`,
     badge: pct(total),
     rows,
-    // 概率已经标在柱子右上角了，这里不再重复；脚注只留给「第几根」
-    footer: bucketed
-      ? `第 ${i + 1} / ${count} 根柱子（每根合并若干分数）`
-      : `第 ${i + 1} / ${count} 个可能分数`,
   };
 }
 
@@ -570,10 +569,11 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
 
     tooltip.show(
       {
+        // 标题只说「哪条线」，概率放 badge；**不写副标题**：
+        // 图名已经叫 `P(得分 ≥ 分数线)`，再抄一遍公式是废话。
         title: `${scores[i]!.toFixed(1)} 分及以上`,
-        subtitle: `P(得分 ≥ ${scores[i]!.toFixed(1)})`,
+        badge: pct(survival[i]!, 2),
         rows: [
-          { label: '概率', value: pct(survival[i]!, 2), color: SERIES_COLOR },
           {
             label: '大约多少个胚子',
             value: survival[i]! > 0 ? `1 / p ≈ ${formatCount(1 / survival[i]!)}` : '不可能',
@@ -582,7 +582,6 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
         ...(bars && bars.length > 0
           ? { bars, ...(hitMixCaption ? { barsCaption: hitMixCaption } : {}) }
           : {}),
-        footer: '曲线越靠右越低，说明高分越稀有',
       },
       ev.clientX,
       ev.clientY,
@@ -648,11 +647,14 @@ function formatCount(n: number): string {
 // ---------------------------------------------------------------------------
 
 export interface HistogramItem {
+  /** 轴上的标号 */
   label: string;
   value: number;
   color?: string;
-  /** 悬停时补充说明；给 `undefined` 等价于不给 */
-  note?: string | undefined;
+  /** 浮框标题；省略则用 `label`（轴上放得下 `2.0`，浮框里要写「2.0 分」时用这个） */
+  title?: string | undefined;
+  /** 浮框里额外补的几行（**只放图上读不到的**） */
+  rows?: TooltipRow[] | undefined;
 }
 
 export interface HistogramOptions {
@@ -737,11 +739,10 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       guide.classList.add('on');
       tooltip.show(
         {
-          title: d.label,
-          rows: [
-            { label: '概率', value: format(d.value), color: d.color ?? hitColor(i) },
-            ...(d.note ? [{ label: '说明', value: d.note }] : []),
-          ],
+          // 纵轴就是「概率」，所以数值进 badge，不再另起一行叫「概率」
+          title: d.title ?? d.label,
+          badge: format(d.value),
+          rows: d.rows ?? [],
         },
         ev.clientX,
         ev.clientY,
@@ -766,6 +767,8 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 export interface QualitySegment {
   /** 组合的展示名，如 `暴击 + 充能` */
   label: string;
+  /** 组合里的词条（勾选框靠它判断高亮） */
+  attrs: SubAttr[];
   /** 组合里有几条有效词条（= 颜色档，也是堆叠顺序） */
   size: number;
   /** 该组合占全部胚子的概率 */
@@ -786,6 +789,14 @@ export interface QualityBar {
 export interface QualityChartOptions {
   /** 得分升序 */
   bars: QualityBar[];
+  /**
+   * 高亮的词条（子 tab 上的勾选框）。
+   *
+   * 组合**包含全部**被勾选的词条时高亮，其余压暗 —— 与参考实现
+   * `plot_quality_distribution_stacked` 的 `highlight_comb` 同一套语义
+   * （`set(highlight).issubset(combo)`）。空集合 = 不高亮（全部正常显示）。
+   */
+  highlight?: readonly SubAttr[];
   /** 图内标题；通常由外层 HTML 负责 */
   title?: string;
   host?: HTMLElement | null;
@@ -815,6 +826,10 @@ export interface QualityChartOptions {
  */
 export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
   const { bars, title, tooltip } = opts;
+  const highlight = opts.highlight ?? [];
+  /** 该组合是否含全部被勾选的词条 */
+  const isHit = (s: QualitySegment): boolean =>
+    highlight.length > 0 && highlight.every((a) => s.attrs.includes(a));
   const fit = fitSize(opts.host, SHARED_FIT);
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
@@ -878,31 +893,47 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
       if (s.p <= 0) continue;
       const y0 = yOf(bottom + s.p);
       const h = yOf(bottom) - y0;
-      f.plot.append(
-        el('rect', {
-          x: x - barW / 2,
-          y: y0,
-          width: barW,
-          height: Math.max(h, 0.6),
-          fill: hitColor(s.size),
-          class: 'bar-seg',
-        }),
-      );
+      const rect = el('rect', {
+        x: x - barW / 2,
+        y: y0,
+        width: barW,
+        height: Math.max(h, 0.6),
+        fill: hitColor(s.size),
+        class: 'bar-seg',
+      });
+      // 勾选框的命中段：描边挑出来，其余压暗。压暗比「换个颜色」更能看清
+      // 「哪些段属于它」，而且不会把「段色 = 几条有效词条」这套编码毁掉。
+      if (highlight.length > 0) {
+        rect.classList.add(isHit(s) ? 'seg-hit' : 'seg-dim');
+      }
+      f.plot.append(rect);
       // 段内标注是两行（名字 + 概率），所以高度要够两行才画，否则字会压出段外；
       // 宽度也要够（柱宽只有几十像素）。放不下就交给浮框。
       // 名字去掉 `+` 两侧的空格：`暴击 + 精通` 会白占两个字符位。
       const compact = s.label.replace(/ \+ /g, '+');
       const fits = h >= 23 && compact.length * 9.4 <= barW - 4;
       if (fits) {
-        f.plot.append(
-          text(compact, { x, y: y0 + h / 2 - 2.5, 'text-anchor': 'middle', class: 'seg-label' }),
-        );
-        f.plot.append(
-          text(pct(s.p, 1), { x, y: y0 + h / 2 + 8, 'text-anchor': 'middle', class: 'seg-pct' }),
-        );
+        // 压暗的段，它的字也得跟着压暗，否则白字浮在灰底上很脏
+        const dim = highlight.length > 0 && !isHit(s);
+        const name = text(compact, {
+          x,
+          y: y0 + h / 2 - 2.5,
+          'text-anchor': 'middle',
+          class: 'seg-label',
+        });
+        const value = text(pct(s.p, 1), {
+          x,
+          y: y0 + h / 2 + 8,
+          'text-anchor': 'middle',
+          class: 'seg-pct',
+        });
+        if (dim) {
+          name.classList.add('seg-dim');
+          value.classList.add('seg-dim');
+        }
+        f.plot.append(name, value);
       }
       bottom += s.p;
-      void y0;
     }
     // 柱顶总概率。**与自己那条累计刻度会挤在一起时不画**：累计曲线是缩放进柱子量纲的，
     // 概率越小两条标签的竖直间距越小（最后一根柱子上 `柱顶 = 累计`，必然重叠）。
@@ -969,6 +1000,8 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
+      // 明细行 = 这根柱子由哪些组合凑成（图上只标得下几个）。
+      // 本分数的合计已经在 badge 里了，**不要再补一行「本分数合计」**。
       const rows: TooltipRow[] = [...b.segments]
         .sort((p, q) => q.p - p.p)
         .map((s) => ({
@@ -976,13 +1009,11 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
           value: pct(s.p, 2),
           color: hitColor(s.size),
         }));
-      rows.push({ label: '本分数合计', value: pct(b.total, 2) });
       tooltip.show(
         {
           title: `${b.score} 分`,
           badge: pct(b.total, 2),
           rows,
-          footer: `P(得分 ≥ ${b.score}) = ${pct(b.atLeast, 2)}`,
         },
         ev.clientX,
         ev.clientY,

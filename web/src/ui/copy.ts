@@ -180,9 +180,6 @@ export function markerProb(p: string): string {
 export function hitLabel(hits: number): string {
   return `命中 ${hits} 次`;
 }
-export function sameScoreCombos(n: number): string {
-  return `${n} 种组合同分`;
-}
 
 export const QUANTILE_HINT = 'α =「不低于该分数线」的概率。';
 export const TH_HITS = '命中有效词条';
@@ -196,10 +193,9 @@ export function topPercent(alpha: number): string {
 }
 
 export const QUALITY_DIST_HINT = '仅统计掉落瞬间的 4 个副词条，不含强化成长。';
-export const COMBOS_HINT = '得分最高的那一项已单独摘出；概率过小的长尾合并为「其他」。';
-export const COMBOS_TOP_NOTE = '有效词条全齐，得分最高的那一项';
+export const COMBOS_HINT = '得分最高的那一项已摘出并固定在左上角；概率过小的长尾合并为「其他」。';
 export const QUALITY_DETAIL_HINT =
-  '柱内按组合拆开，颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。';
+  '柱内按组合拆开，颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。勾选词条可高亮对应组合。';
 export const ATTRS_HINT = '「胚子含该词条」的概率；词条不重复，故不等于权重占比。';
 export const TH_ATTR = '词条';
 export const TH_ATTR_PROB = '出现概率';

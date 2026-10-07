@@ -1101,6 +1101,7 @@ export function mount(root: HTMLElement): void {
         atLeast: acc,
         segments: b.combos.map((c) => ({
           label: comboLabel(c.combo),
+          attrs: [...c.combo],
           size: c.combo.length,
           p: c.p,
         })),
@@ -1142,6 +1143,8 @@ export function mount(root: HTMLElement): void {
       const panels = node('div', { class: 'subtab-panels' });
       const bar = node('div', { class: 'subtabs', role: 'tablist' });
       let dist: QualityDistribution | null = null;
+      /** 「质量分布（详细）」里勾选高亮的词条；纯看图状态，不进 URL */
+      const picked = new Set<SubAttr>();
 
       const subs: SubTab[] = [
         {
@@ -1169,13 +1172,23 @@ export function mount(root: HTMLElement): void {
             });
             pieBox.append(
               renderPie({
-                items: slices.map((s) => ({
-                  label: s.label,
-                  p: s.p,
-                  ...(top && s.combos.length === 1 && sameCombo(s.combos[0]!.combo, top)
-                    ? { explode: true, note: C.COMBOS_TOP_NOTE }
-                    : {}),
-                })),
+                items: slices.map((s) => {
+                  const single = s.combos.length === 1 ? s.combos[0] : undefined;
+                  return {
+                    label: s.label,
+                    p: s.p,
+                    // 浮框里只放图上读不到的：单个组合 → 它值多少分；
+                    // 「其他」→ 里面合并了哪些组合（图上只有一个扇区）
+                    rows: single
+                      ? [{ label: '得分', value: `${single.score} 分` }]
+                      : s.combos
+                          .slice()
+                          .sort((x, y) => y.p - x.p)
+                          .slice(0, 6)
+                          .map((c) => ({ label: comboLabel(c.combo), value: pct(c.p) })),
+                    ...(top && single && sameCombo(single.combo, top) ? { explode: true } : {}),
+                  };
+                }),
                 title: C.SUB_COMBOS,
                 tooltip: tabCtx.tooltip,
               }),
@@ -1196,8 +1209,13 @@ export function mount(root: HTMLElement): void {
               renderHistogram({
                 items: (buckets.length > 0 ? buckets : dist.buckets).map((b) => ({
                   label: fmtScore(b.score),
+                  title: `${fmtScore(b.score)} 分`,
                   value: b.p,
-                  note: b.combos.length > 1 ? C.sameScoreCombos(b.combos.length) : undefined,
+                  // 这一分数由哪些组合同分凑出来 —— 图上一根柱子看不出来，浮框里补上
+                  rows: b.combos
+                    .slice()
+                    .sort((x, y) => y.p - x.p)
+                    .map((c) => ({ label: comboLabel(c.combo), value: pct(c.p) })),
                 })),
                 title: C.AXIS_SCORE,
                 host: chart,
@@ -1210,22 +1228,47 @@ export function mount(root: HTMLElement): void {
           /**
            * 质量分布（详细）：每根柱子按「是哪几条词条的组合」拆开堆叠，
            * 再叠一条累计概率曲线。参考 `docs/ai-ref/v1/init_stats/暴伤/质量分布-详细-1.png`。
+           *
+           * 上面那排勾选框对应「有效词条」：勾上就把它所在的**子柱子**（组合段）
+           * 挑出来、其余压暗 —— 参考图的 `highlight_comb` 就是这个用法。
+           * 勾选状态是**看图用的，不进 URL**（换个链接不该带着别人的高亮）。
            */
           label: C.SUB_QUALITY_DETAIL,
           render(box) {
             const p = panel('', C.QUALITY_DETAIL_HINT);
             p.box.classList.add('flush');
+
+            const tools = node('div', { class: 'chart-tools checks' });
+            for (const a of dist?.attrProbs ?? []) {
+              const lab = node('label', { class: 'check' });
+              const input = node('input', { type: 'checkbox', 'data-attr': a.attr });
+              input.checked = picked.has(a.attr);
+              input.addEventListener('change', () => {
+                if (input.checked) picked.add(a.attr);
+                else picked.delete(a.attr);
+                paint();
+              });
+              lab.append(input, node('span', {}, `${a.attr} ${pct(a.p)}`));
+              tools.append(lab);
+            }
+
             const chart = node('div', { class: 'chart-wrap', id: 'qualityDetail' });
-            p.body.append(chart);
+            p.body.append(tools, chart);
             box.append(p.box);
             if (!dist) return;
-            chart.append(
-              renderQualityStacked({
-                bars: qualityBarsOf(dist),
-                host: chart,
-                tooltip: tabCtx.tooltip,
-              }),
-            );
+
+            const bars = qualityBarsOf(dist);
+            function paint(): void {
+              chart.replaceChildren(
+                renderQualityStacked({
+                  bars,
+                  highlight: [...picked],
+                  host: chart,
+                  tooltip: tabCtx.tooltip,
+                }),
+              );
+            }
+            paint();
           },
         },
         {

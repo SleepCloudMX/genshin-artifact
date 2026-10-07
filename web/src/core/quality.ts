@@ -231,12 +231,15 @@ export interface PieSlice {
 }
 
 /**
- * 把组合概率整理成饼图分片：按概率降序取前 `maxSlices` 个，
- * 概率低于 `minShare` 的以及超出上限的长尾合并成一个「其他」扇区。
+ * 把组合概率整理成饼图分片。
  *
- * `keep` 指定的那个组合**永远单独成片**（且不占 `maxSlices` 的名额）：
- * 它正是「有效词条全齐」的那一项 —— 概率最小，却常是这张图要回答的问题
- * （参考实现 `plot_attr_pie` 就是这么把它从饼里「摘出来」画的）。
+ * 顺序是**画图顺序**：`keep` 的那一项在最前（起点固定在左上角，参考
+ * `plot_attr_pie` 的 `startangle=140`），其余**按概率升序**，
+ * 「其他」垫底 —— 于是从左上角逆时针走过去扇区越来越大，最大的收在起点旁边。
+ *
+ * 概率低于 `minShare`、或超出 `maxSlices` 名额的长尾合并成「其他」。
+ * 但 `keep` 指定的那个组合**永远单独成片**（不占名额、不被合并）：
+ * 它正是「有效词条全齐」的那一项 —— 概率最小，却常是这张图要回答的问题。
  *
  * 不变量：所有分片的概率之和 === 所有组合的概率之和（图形不会丢概率）。
  */
@@ -249,28 +252,26 @@ export function pieSlices(
   const keep = opts.keep;
   const sorted = [...combos].sort((x, y) => y.p - x.p);
 
-  const slices: PieSlice[] = [];
-  const rest: QualityCombo[] = [];
-
   const kept = keep && keep.length > 0 ? sorted.find((c) => sameCombo(c.combo, keep)) : undefined;
-  if (kept) slices.push({ label: comboLabel(kept.combo), p: kept.p, combos: [kept], aggregated: false });
-
-  let taken = 0;
+  const singles: QualityCombo[] = [];
+  const merged: QualityCombo[] = [];
   for (const c of sorted) {
     if (c === kept) continue;
-    if (taken < maxSlices && c.p >= minShare) {
-      slices.push({ label: comboLabel(c.combo), p: c.p, combos: [c], aggregated: false });
-      taken++;
-    } else {
-      rest.push(c);
-    }
+    if (singles.length < maxSlices && c.p >= minShare) singles.push(c);
+    else merged.push(c);
   }
 
-  if (rest.length > 0) {
+  const slices: PieSlice[] = [];
+  if (kept) slices.push({ label: comboLabel(kept.combo), p: kept.p, combos: [kept], aggregated: false });
+  // 画图顺序 = 概率升序：从左上角逆时针走过去，扇区越来越大
+  for (const c of singles.sort((x, y) => x.p - y.p)) {
+    slices.push({ label: comboLabel(c.combo), p: c.p, combos: [c], aggregated: false });
+  }
+  if (merged.length > 0) {
     slices.push({
-      label: `其他 ${rest.length} 种组合`,
-      p: rest.reduce((s, c) => s + c.p, 0),
-      combos: rest,
+      label: `其他 ${merged.length} 种组合`,
+      p: merged.reduce((s, c) => s + c.p, 0),
+      combos: merged,
       aggregated: true,
     });
   }
