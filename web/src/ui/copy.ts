@@ -48,14 +48,15 @@ export const SUBSTATS_HINT_ROLL =
  * 这一页与「得分分布」的差别是**条数不限**：那边是 4 个槽位（胚子终态就是 4 条），
  * 这边只统计「这些词条长在胚子上的情况」。权重就是分数，**不乘成长值**。
  *
- * 表格只列**已经在用的**词条（权重 0 的行不显示），所以要交代怎么加、怎么删 ——
- * 这两件事都不是自明的（加在下面的按钮上，删在 `−` 归零上）。
+ * 表格是一份用户自己增删的清单，所以要把三件事交代清楚：怎么加、怎么删、按什么排。
  */
 export const QUALITY_WEIGHTS_HINT =
-  '权重即得分，不乘成长值；条数不限，权重归零即从表里移除。';
+  '权重即得分，不乘成长值；按权重从高到低排列，+ 在末尾追加一行、× 删除该行。';
 export const ADD_ATTR = '+ 添加词条';
-export const ADD_ATTR_TITLE = '再加一条计分词条';
+export const ADD_ATTR_TITLE = '在末尾追加一行（词条待选）';
 export const ADD_ATTR_NONE = '副词条已全部列出';
+/** 每行末尾那个叉号 */
+export const ARIA_ROW_DELETE = '删除这一行';
 
 export const COL_ATTR = '词条';
 export const COL_WEIGHT = '权重';

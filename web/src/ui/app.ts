@@ -75,15 +75,19 @@ import { Tooltip } from '../render/tooltip';
 import {
   CANONICAL_WEIGHT,
   QUALITY_WEIGHT,
+  QUALITY_WEIGHT_STEP,
   defaultGrowth,
   defaultQuality,
   defaultShared,
   fromQuery,
   nextWeightDown,
   nextWeightUp,
-  qualityAttrsOf,
+  qualityRowsInView,
+  qualityUsedAttrs,
+  qualityWeights,
   qualityWeightOnSelect,
   quantizeWeight,
+  stepQualityWeight,
   weightOnSelect,
   selectableAttrs,
   toSpec,
@@ -91,6 +95,7 @@ import {
   type AppState,
   type GrowthConfig,
   type QualityConfig,
+  type QualityRow,
   type SharedConfig,
   type SlotInput,
 } from './state';
@@ -359,16 +364,16 @@ export function mount(root: HTMLElement): void {
    * 不剔的话，界面上会留着一行「计分」的非法词条，而 core 那边悄悄把它丢掉 ——
    * 卡片上的「有效词条 N 条」和表里的行数就对不上了。
    */
-  function withoutConflicts(mainAttr: MainAttr): Pick<AppState, 'slots' | 'weights'> {
+  function withoutConflicts(mainAttr: MainAttr): Pick<AppState, 'slots' | 'rows'> {
     const badSlot = excludedAt(state.slot, mainAttr);
     const slots = state.slots.map((s) =>
       s.attr !== '' && s.attr === badSlot ? { ...s, attr: '' as const, weight: 0 } : { ...s },
     ) as AppState['slots'];
 
-    const weights = { ...state.weights };
-    const badWeight = excludedSubstat(mainAttr);
-    if (badWeight) delete weights[badWeight];
-    return { slots, weights };
+    // 词条表：**整行删掉**（不是清成空行）—— 这一行已经不可能成立了，留着只是噪音
+    const badRow = excludedSubstat(mainAttr);
+    const rows = state.rows.filter((r) => r.attr === '' || r.attr !== badRow);
+    return { slots, rows };
   }
 
   /** 主词条下拉：可选项由**部位**限定（火伤只有杯能出） */
@@ -638,14 +643,21 @@ export function mount(root: HTMLElement): void {
   }
 
   /**
-   * 「胚子质量」的词条权重表：**只列正在计分的词条**（权重 > 0），条数不限。
+   * 「胚子质量」的词条权重表：**一份用户自己增删的清单**，条数不限。
    *
-   * 与「得分分布」那张表的区别（作者明确要求）：
+   * 与「得分分布」那张表的区别：
    *   - 那边是「4 个槽位」——胚子终态就是 4 条副词条，槽位顺序还有语义（决定 3 词条胚子
    *     的第 4 条是谁），所以必须定长、必须带「初始档位」；
-   *   - 这一页统计的是「这些词条长在胚子上的情况」，关心一条还是十条都行，
-   *     所以行数由配置决定：**权重归零那一行就消失**（作者要求 0 的行不显示），
-   *     要加就用下面的「+ 添加词条」。
+   *   - 这一页统计的是「这些词条长在胚子上的情况」，关心一条还是十条都行。
+   *
+   * 三条交互口径（作者定的，别改回去）：
+   *   1. **删除只走 ×**：权重减到 0 只是「这条暂时不计分」，行还在表里。
+   *      旧版把「权重归零」当成删除，于是「按减号有时候直接没了」，很反直觉；
+   *   2. **「+ 添加词条」在最后追加一行**：不替用户猜词条（旧版取「剩下第一条」，
+   *      看着像随机添加、还因为按 `SUB_ATTRS` 排序而插到最前面），
+   *      新行的词条是空的、权重 1，**选之前不参与绘图**；
+   *   3. **表按权重从高到低排**（同权重保持添加顺序，空行垫底）。
+   *      权重一改行可能换位置，所以重建后要把焦点还回同一个控件（见 `refocus`）。
    *
    * 权重就是**分**，不乘成长值；默认口径是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2。
    * 候选集由 `selectableAttrs` 给出：主词条自己不能当副词条（`爆伤` / `暴伤` 也算同一条），
@@ -657,8 +669,9 @@ export function mount(root: HTMLElement): void {
       node('h3', { class: 'sub' }, C.SECT_SUBSTATS),
       node('p', { class: 'hint' }, C.QUALITY_WEIGHTS_HINT),
     );
-    const head = node('div', { class: 'slot-head two-col' });
-    head.append(node('span', {}, C.COL_ATTR), node('span', {}, C.COL_WEIGHT));
+    const head = node('div', { class: 'slot-head three-col' });
+    // 第三列是 × 的位置，表头留空
+    head.append(node('span', {}, C.COL_ATTR), node('span', {}, C.COL_WEIGHT), node('span', {}, ''));
     box.append(head);
 
     const rows = node('div', { class: 'slot-rows', id: 'qualityRows' });
@@ -671,44 +684,98 @@ export function mount(root: HTMLElement): void {
 
     /** 还能加进来的词条：不是主词条、也还不在表里 */
     function freeAttrs(): SubAttr[] {
-      const used = new Set(qualityAttrsOf(state.weights));
+      const used = new Set(qualityUsedAttrs(state.rows));
       return selectableAttrs(state.mainAttr).filter((a) => !used.has(a));
     }
 
+    /**
+     * 加一行：**追加在最后、默认不选词条、权重 1**。
+     *
+     * 不替用户猜词条（旧版「取剩下第一条」看着就像随机加的）；这一行在用户选之前
+     * 不参与绘图（`qualityWeights` 忽略空行）。空行永远排在表尾，见 `qualityRowsInView`。
+     */
     add.addEventListener('click', () => {
-      const next = freeAttrs()[0];
-      if (!next) return;
-      setState({ weights: { ...state.weights, [next]: qualityWeightOnSelect(next) } });
+      if (freeAttrs().length === 0) return;
+      setState({ rows: [...state.rows, { attr: '', weight: 1 }] });
     });
 
     /**
-     * 行结构的指纹：**主词条 + 表里有哪些词条**。
+     * 行结构的指纹：**主词条 + 有哪些行**（行的标识**排序后**再拼，与先后无关）。
      *
-     * 它决定下拉里有哪些选项、也就决定有哪几行，因此也决定「能不能原地改」——
-     * 权重只是值，原地写回即可（与 `slotsField` 同一套做法）。
+     * 标识只认「这一行是哪个词条」（空行按出现次序编号，因为空行永远垫底、相对次序不变）。
+     * 指纹里**不含顺序**是有意的：只改了权重时，变化的只有顺序 ——
+     * 那时不必重建，把节点按新顺序搬一遍就行，正在输入的那个框连焦点带光标都原样留着。
      */
     let structure = '';
 
-    function structureOf(): string {
-      return `${state.mainAttr}|${qualityAttrsOf(state.weights).join(',')}`;
+    function keyOf(view: readonly QualityRow[]): string[] {
+      let empty = 0;
+      return view.map((r) => (r.attr === '' ? `e:${empty++}` : `a:${r.attr}`));
     }
 
-    function render(): void {
-      const order = qualityAttrsOf(state.weights);
-      const allowed = selectableAttrs(state.mainAttr);
-      rows.replaceChildren();
-      for (const attr of order) {
-        const r = node('div', { class: 'slot-row two-col' });
+    function structureOf(): string {
+      return `${state.mainAttr}|${keyOf(qualityRowsInView(state.rows)).sort().join(',')}`;
+    }
 
-        const sel = node('select', { 'data-attr': attr, 'data-key': 'qattr' });
-        sel.append(option('', C.NOT_SCORED, false));
+    /** DOM 上的行序 = 显示顺序：把这个下标写回每个控件，事件处理靠它认行 */
+    function stampRows(): void {
+      [...rows.children].forEach((child, i) => {
+        for (const el of child.querySelectorAll<HTMLElement>('[data-key]')) {
+          el.dataset['row'] = String(i);
+        }
+      });
+    }
+
+    /**
+     * 只改了权重时：把行按新顺序排好，**但不重建任何节点**。
+     *
+     * 用「最少移动」的排法（从后往前，已经在该在的位置上就不碰）：
+     * 一个节点被移出再插回会掉焦点，而这里通常只需要挪动别的行 ——
+     * 正在输入的那一行原地不动，焦点与光标都是原样。
+     * 万一那一行自己确实要挪位（焦点掉了），搬完再还给它。
+     */
+    function reorder(view: readonly QualityRow[]): void {
+      const byKey = new Map<string, Element>();
+      for (const child of [...rows.children]) {
+        byKey.set((child as HTMLElement).dataset['rowKey'] ?? '', child);
+      }
+      const target = keyOf(view)
+        .map((k) => byKey.get(k))
+        .filter((el): el is Element => el !== undefined);
+      const active = document.activeElement as HTMLElement | null;
+      const hadFocus = active && rows.contains(active) ? active : null;
+
+      let ref: Element | null = null;
+      for (let i = target.length - 1; i >= 0; i--) {
+        const el = target[i]!;
+        const inPlace = ref ? ref.previousElementSibling === el : rows.lastElementChild === el;
+        if (!inPlace) rows.insertBefore(el, ref);
+        ref = el;
+      }
+      stampRows();
+      if (hadFocus && document.activeElement !== hadFocus) hadFocus.focus();
+    }
+
+    /** 重建表格（行数、词条、主词条变了才走这里） */
+    function render(): void {
+      const view = qualityRowsInView(state.rows);
+      const keys = keyOf(view);
+      const allowed = selectableAttrs(state.mainAttr);
+      const used = qualityUsedAttrs(view);
+      rows.replaceChildren();
+      view.forEach((row, i) => {
+        const r = node('div', { class: 'slot-row three-col' });
+        r.dataset['rowKey'] = keys[i]!;
+
+        const sel = node('select', { 'data-key': 'qattr' });
+        sel.append(option('', C.NOT_SCORED, row.attr === ''));
         for (const a of allowed) {
-          const opt = option(a, a, a === attr);
+          const opt = option(a, a, a === row.attr);
           // 已经被别的行占着的词条：列出来但不可选（同一张表里不能出现两条一样的）
-          if (a !== attr && order.includes(a)) opt.disabled = true;
+          if (a !== row.attr && used.includes(a)) opt.disabled = true;
           sel.append(opt);
         }
-        sel.value = attr;
+        sel.value = row.attr;
 
         const stepper = node('div', { class: 'stepper' });
         const step = (delta: -1 | 1): HTMLButtonElement =>
@@ -717,7 +784,6 @@ export function mount(root: HTMLElement): void {
             {
               type: 'button',
               class: 'step',
-              'data-attr': attr,
               'data-key': 'qstep',
               'data-delta': String(delta),
               'aria-label': delta > 0 ? C.ARIA_WEIGHT_UP : C.ARIA_WEIGHT_DOWN,
@@ -727,35 +793,46 @@ export function mount(root: HTMLElement): void {
         const input = node('input', {
           type: 'number',
           min: '0',
-          step: '0.1',
+          step: String(QUALITY_WEIGHT_STEP),
           inputmode: 'decimal',
-          'data-attr': attr,
           'data-key': 'qweight',
-          'aria-label': C.ariaWeightOf(attr, order.indexOf(attr)),
+          'aria-label': C.ariaWeightOf(row.attr, i),
         });
-        input.value = String(state.weights[attr] ?? 0);
+        input.value = String(row.weight);
         stepper.append(step(-1), input, step(1));
 
-        r.append(sel, stepper);
+        // 删除：**只有这个叉号会删行**（权重减到 0 不再顺手把行抹掉）
+        const del = node(
+          'button',
+          {
+            type: 'button',
+            class: 'row-del',
+            'data-key': 'qdel',
+            'aria-label': C.ARIA_ROW_DELETE,
+            title: C.ARIA_ROW_DELETE,
+          },
+          '×',
+        );
+
+        r.append(sel, stepper, del);
         rows.append(r);
-      }
+      });
+      stampRows();
       structure = structureOf();
       syncAdd();
     }
 
-    /** 权重只是值：不重建行，只写回（正在编辑的那个框不覆盖，避免光标跳到末尾） */
+    /** 只是数值变了：不重建行，只写回（正在编辑的那个框不覆盖，避免光标跳到末尾） */
     function syncRows(): void {
-      for (const r of [...rows.children] as HTMLElement[]) {
-        const attr = r.querySelector<HTMLSelectElement>('select[data-key="qattr"]')?.dataset[
-          'attr'
-        ] as SubAttr | undefined;
-        if (!attr) continue;
-        const w = state.weights[attr] ?? 0;
+      const view = qualityRowsInView(state.rows);
+      view.forEach((row, i) => {
+        const r = rows.children[i] as HTMLElement | undefined;
+        if (!r) return;
         const input = r.querySelector<HTMLInputElement>('input[data-key="qweight"]');
-        if (input && document.activeElement !== input) input.value = String(w);
+        if (input && document.activeElement !== input) input.value = String(row.weight);
         const minus = r.querySelector<HTMLButtonElement>('.step[data-delta="-1"]');
-        if (minus) minus.disabled = !(w > 0);
-      }
+        if (minus) minus.disabled = !(row.weight > 0);
+      });
       syncAdd();
     }
 
@@ -766,61 +843,68 @@ export function mount(root: HTMLElement): void {
       add.title = free.length === 0 ? C.ADD_ATTR_NONE : C.ADD_ATTR_TITLE;
     }
 
-    // 与「得分分布」同一套交互：**回车 / 失焦才提交**（见 slotsField 的注释），
+    // 与「得分分布」同一套提交时机：**回车 / 失焦才提交**（见 slotsField 的注释），
     // 步进按钮读输入框的当前值而不是 state。
     rows.addEventListener('change', onEdit);
     rows.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).dataset['key'] === 'qstep') onEdit(ev);
+      const key = (ev.target as HTMLElement).dataset['key'];
+      if (key === 'qstep' || key === 'qdel') onEdit(ev);
     });
 
     function onEdit(ev: Event): void {
       const t = ev.target as HTMLInputElement | HTMLButtonElement | HTMLSelectElement;
-      const attr = t.dataset['attr'] as SubAttr | undefined;
-      if (!attr) return;
-      const weights = { ...state.weights };
-      const canonical = QUALITY_WEIGHT[attr];
+      const idx = Number(t.dataset['row']);
+      if (!Number.isInteger(idx)) return;
+      const list = [...state.rows];
+      // DOM 上的行序是**显示顺序**（权重降序、空行垫底），要换算回 state 里的下标
+      const view = qualityRowsInView(state.rows);
+      const row = view[idx];
+      if (!row) return;
+      const at = list.indexOf(row);
+      if (at < 0) return;
 
       switch (t.dataset['key']) {
         case 'qattr': {
-          // 换成别的词条：旧的那条腾出来，新的按默认口径给初值（与槽位表选词条一致）；
-          // 选「不计分」= 这一行撤掉
+          // 选词条：按该词条的默认口径给权重初值（与槽位表选词条一致）；
+          // 选「不计分」= 这一行空着（不删行）
           const next = (t as HTMLSelectElement).value as SubAttr | '';
-          delete weights[attr];
-          if (next !== '' && next !== attr) weights[next] = qualityWeightOnSelect(next);
+          list[at] = { attr: next, weight: next === '' ? 1 : qualityWeightOnSelect(next) };
           break;
         }
         case 'qweight': {
           const raw = t.value.trim();
-          const w = raw === '' ? 0 : quantizeWeight(Number(raw));
-          if (w > 0) weights[attr] = w;
-          else delete weights[attr];
+          list[at] = { ...row, weight: raw === '' ? 0 : quantizeWeight(Number(raw)) };
           break;
         }
         case 'qstep': {
+          // 以**输入框里的值**为准（用户可能刚手改过、那一步还没进 state）
           const input = t.parentElement?.querySelector<HTMLInputElement>('input[data-key="qweight"]');
-          const from = Number(input?.value ?? weights[attr] ?? 0);
-          const base = Number.isFinite(from) ? from : (weights[attr] ?? 0);
-          const next =
-            Number(t.dataset['delta']) > 0
-              ? nextWeightUp(base, canonical)
-              : nextWeightDown(base, canonical);
-          if (next > 0) weights[attr] = next;
-          else delete weights[attr];
+          const from = Number(input?.value);
+          const base = Number.isFinite(from) ? from : row.weight;
+          list[at] = { ...row, weight: stepQualityWeight(base, Number(t.dataset['delta'])) };
+          break;
+        }
+        case 'qdel': {
+          list.splice(at, 1);
           break;
         }
         default:
           return;
       }
-      setState({ weights });
+      setState({ rows: list });
     }
 
     return {
       box,
       refresh() {
-        // 只有行结构变了才重建（权重归零会让一行消失、加号会多出一行）。
-        // **不能无条件重建**：权重框回车提交时焦点还在框里，重建会把它摘掉。
-        if (structureOf() === structure) syncRows();
-        else render();
+        // 行数 / 词条 / 主词条变了才重建；**只改了权重就只搬节点、只写数值** ——
+        // 这样权重框里正在输入的东西（焦点、光标）原样留着，行却已经按新权重排好。
+        if (structureOf() === structure) {
+          reorder(qualityRowsInView(state.rows));
+          syncRows();
+        } else {
+          render();
+        }
       },
     };
   }
@@ -1367,7 +1451,7 @@ export function mount(root: HTMLElement): void {
             p.body.append(t.table);
             box.append(p.box);
             if (!dist) return;
-            const weights = state.weights;
+            const weights = qualityWeights(state);
             t.body.replaceChildren(
               ...dist.attrProbs
                 .slice()
@@ -1385,8 +1469,9 @@ export function mount(root: HTMLElement): void {
 
       this.update = () => {
         try {
-          // 胚子质量用自己的权重表（每条词条一个分，不乘成长值），与「得分分布」无关
-          dist = qualityDistribution({ mainAttr: state.mainAttr, weights: state.weights });
+          // 胚子质量用自己的权重表（每条词条一个分，不乘成长值），与「得分分布」无关。
+          // 空行 / 权重 0 的行在这里被 `qualityWeights` 忽略掉（作者要求空行不参与绘图）。
+          dist = qualityDistribution({ mainAttr: state.mainAttr, weights: qualityWeights(state) });
         } catch (err) {
           dist = null;
           note.textContent = `${C.CALC_FAILED}${(err as Error).message}`;

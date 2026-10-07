@@ -75,6 +75,18 @@ export interface GrowthConfig {
 }
 
 /**
+ * 「胚子质量」词条表的一行。
+ *
+ * `attr` 为空 = **这一行还没选词条**（「+ 添加词条」刚加出来的样子）：
+ * 它留在表里等用户选，但**不参与绘图**（`qualityWeights` 会忽略它）。
+ */
+export interface QualityRow {
+  attr: SubAttr | '';
+  /** 计分权重（分）。`0` 或空行都不计分，但行本身仍在表里 */
+  weight: number;
+}
+
+/**
  * 「胚子质量」的评分标准：**每条副词条一个权重，条数不限**。
  *
  * 与「得分分布」的 4 个槽位是两件事：
@@ -83,10 +95,17 @@ export interface GrowthConfig {
  *
  * 权重是**分**，**不乘成长值** —— 胚子质量看的是掉落那一刻拥有哪些词条，
  * 与强化无关（见 `core/quality.ts`）。
+ *
+ * ## 为什么存「行的列表」而不是「词条 → 权重」的表
+ *
+ * 界面上这张表是**用户自己增删的一份清单**：能加一行还没选词条的空行、能按 × 删掉任意一行、
+ * 显示顺序按权重降序。这些都不是「一个映射」能表达的 —— 映射里没有空行、没有顺序，
+ * 也分不清「用户删了这一行」和「这一行权重是 0」。
+ * 喂给 core 的形状（词条 → 权重）由 `qualityWeights()` 现算，两边各司其职。
  */
 export interface QualityConfig {
-  /** 词条 → 权重；`> 0` 即有效词条。没列出的词条视为 0 */
-  weights: Partial<Record<SubAttr, number>>;
+  /** 词条表的行，**按用户添加的顺序**存；显示顺序由 `qualityRowsInView()` 定 */
+  rows: QualityRow[];
 }
 
 export interface AppState extends SharedConfig, GrowthConfig, QualityConfig {}
@@ -184,25 +203,61 @@ export function weightOnSelect(attr: SubAttr | ''): number {
 }
 
 /**
+ * 「胚子质量」权重表的步长。
+ *
+ * 比成长表（0.1）粗：这里的权重是**分数**（3 / 2 / 1 这种量级），
+ * 0.1 一档要按十下才从 1 到 0（作者点过这个毛病），0.5 一档两下就到。
+ * 要更细的值直接在框里输入 —— 输入仍然支持两位小数。
+ */
+export const QUALITY_WEIGHT_STEP = 0.5;
+
+/** 按固定步长增减，**下限 0、不跳档、不删除行**（删除只走 × 按钮） */
+export function stepQualityWeight(weight: number, delta: number): number {
+  return Math.max(0, round2((weight > 0 ? weight : 0) + delta * QUALITY_WEIGHT_STEP));
+}
+
+/**
  * 「胚子质量」表里选中某词条时的权重初值。
  *
  * 与 `weightOnSelect` 同一套规则（有默认口径就用默认，否则 1），只是换用
- * `QUALITY_WEIGHT` 这张表 —— 表里的行**总是**权重 > 0 的（0 的行不显示），
- * 所以这个初值只在「把某一行换成另一条词条」时用得上。
+ * `QUALITY_WEIGHT` 这张表 —— 默认口径让「加一条暴击」不必手打 3。
  */
 export function qualityWeightOnSelect(attr: SubAttr): number {
   return stepStart(QUALITY_WEIGHT[attr]);
 }
 
 /**
- * 「胚子质量」表要显示的行：权重 > 0 的词条，按 `SUB_ATTRS` 顺序。
+ * 词条表的**显示顺序**：权重高的在前，权重相同的保持用户添加的先后
+ * （所以排序是稳定的），**空行一律垫底**（刚按 + 加出来的那一行总在最后）。
  *
- * 权重 0 的词条不进表（作者要求：0 的行不显示，要加就用「+ 添加词条」）。
- * 顺序固定成 `SUB_ATTRS` 序，与 URL 编码、与「词条概率」子 tab 的候选集一致 ——
- * 换一条词条时行会换位置，但永远不会出现「同一个配置两种排列」。
+ * 不修改原数组：state 里存的是用户的添加顺序，换回来还能复原。
  */
-export function qualityAttrsOf(weights: Partial<Record<SubAttr, number>>): SubAttr[] {
-  return SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0);
+export function qualityRowsInView(rows: readonly QualityRow[]): QualityRow[] {
+  const filled = rows.filter((r) => r.attr !== '');
+  const empty = rows.filter((r) => r.attr === '');
+  // Array.prototype.sort 是稳定的：权重相同的两行不会互换
+  return [...filled.sort((a, b) => b.weight - a.weight), ...empty];
+}
+
+/** 词条表里已经用掉的词条（用于把下拉里重复的选项灰掉） */
+export function qualityUsedAttrs(rows: readonly QualityRow[]): SubAttr[] {
+  return rows.map((r) => r.attr).filter((a): a is SubAttr => a !== '');
+}
+
+/**
+ * 喂给 `core/quality.ts` 的形状：词条 → 权重。
+ *
+ * 空行与权重 0 的行都在这里被忽略（作者要求：空行「此时绘图时忽略这一项」）；
+ * 同一个词条只可能出现在一行里（下拉里重复的选项是灰的），所以不用担心覆盖。
+ */
+export function qualityWeights(state: QualityConfig): Partial<Record<SubAttr, number>> {
+  const out: Partial<Record<SubAttr, number>> = {};
+  for (const { attr, weight } of state.rows) {
+    if (attr === '') continue;
+    const w = quantizeWeight(weight);
+    if (w > 0) out[attr] = w;
+  }
+  return out;
 }
 
 /**
@@ -236,13 +291,20 @@ export function defaultGrowth(): GrowthConfig {
   };
 }
 
-/** 「胚子质量」的默认输入：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2（其余 0） */
+/**
+ * 「胚子质量」的默认输入：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2（其余不列）。
+ *
+ * 列表顺序就是权重降序、同权重按 `SUB_ATTRS` 序，所以**表格一打开就是它该有的样子**
+ * （表按权重降序排，同权重保持列表顺序）。
+ */
 export function defaultQuality(): QualityConfig {
-  const weights: Partial<Record<SubAttr, number>> = {};
-  for (const a of SUB_ATTRS) {
-    if (QUALITY_WEIGHT[a] > 0) weights[a] = QUALITY_WEIGHT[a];
-  }
-  return { weights };
+  const rows: QualityRow[] = SUB_ATTRS.filter((a) => QUALITY_WEIGHT[a] > 0).map((attr) => ({
+    attr,
+    weight: QUALITY_WEIGHT[attr],
+  }));
+  const order = (a: SubAttr): number => SUB_ATTRS.indexOf(a);
+  rows.sort((a, b) => b.weight - a.weight || order(a.attr as SubAttr) - order(b.attr as SubAttr));
+  return { rows };
 }
 
 /** 完整默认状态（三个 tab 的配置合起来） */
@@ -344,30 +406,32 @@ function encodeSlot(s: SlotInput): string {
 }
 
 /**
- * 胚子质量的权重表在 query 里的写法：`暴击:3,暴伤:3,精通:2`。
+ * 胚子质量词条表在 query 里的写法：`暴击:3,暴伤:3,精通:2`。
  *
- * 按 `SUB_ATTRS` 顺序输出，同一个配置永远得到同一个串（便于 diff 分享链接）。
- * 权重 0 的词条不写；**空串是合法状态**（一条都不计分），与「没写过这个参数」不同。
+ * 按**用户添加的顺序**输出（同一个配置永远得到同一个串，便于 diff 分享链接），
+ * 权重 0 的行也照写（表上看得见它，链接就该还原出同一张表）。
+ * **空行不写**：它还没选词条、不参与计算，写进链接只是噪音。
+ * 空串是合法状态（表里一行都没有），与「没写过这个参数」不同。
  */
-function encodeQuality(weights: Partial<Record<SubAttr, number>>): string {
-  return SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0)
-    .map((a) => `${a}:${quantizeWeight(weights[a]!)}`)
+function encodeQuality(rows: readonly QualityRow[]): string {
+  return rows
+    .filter((r) => r.attr !== '')
+    .map((r) => `${r.attr}:${quantizeWeight(r.weight)}`)
     .join(',');
 }
 
-/** 解析胚子质量的权重表；`raw === null`（老链接没带这个参数）时用默认口径 */
+/** 解析胚子质量的词条表；`raw === null`（老链接没带这个参数）时用默认口径 */
 function decodeQuality(raw: string | null, fallback: QualityConfig): QualityConfig {
   if (raw === null) return fallback;
-  const weights: Partial<Record<SubAttr, number>> = {};
+  const rows: QualityRow[] = [];
   for (const chunk of raw.split(',')) {
     const [attr, w] = chunk.split(':');
     if (!attr || !(SUB_ATTRS as readonly string[]).includes(attr)) continue;
     const n = Number(w);
     if (!Number.isFinite(n) || n < 0) continue;
-    const q = quantizeWeight(n);
-    if (q > 0) weights[attr as SubAttr] = q;
+    rows.push({ attr: attr as SubAttr, weight: quantizeWeight(n) });
   }
-  return { weights };
+  return { rows };
 }
 
 export function toQuery(state: AppState): string {
@@ -377,7 +441,7 @@ export function toQuery(state: AppState): string {
   p.set('iv', String(state.initialVisible));
   p.set('target', String(state.targetScore));
   p.set('slots', state.slots.map(encodeSlot).join(','));
-  p.set('qw', encodeQuality(state.weights));
+  p.set('qw', encodeQuality(state.rows));
   // 分桶一律写进链接（有默认值，不存在「没选过」的状态），分享出去是同一个视图
   p.set('bucket', String(state.bucketSize));
   if (state.theme === 'dark') p.set('theme', 'dark');
@@ -427,11 +491,12 @@ export function fromQuery(search: string): AppState {
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
     const bucket = Number(p.get('bucket'));
-    const weights = { ...decodeQuality(p.get('qw'), { weights: fallback.weights }).weights };
     // 副词条不能与主词条重复（`爆伤` / `暴伤` 这种别名也算同一条）：链接可能是
-    // 手改的或旧的，在入口就剔掉 —— 与 `core/quality.ts` 的 `qualityAttrs` 同一口径。
+    // 手改的或旧的，在入口就把这些行剔掉 —— 与 `core/quality.ts` 的 `qualityAttrs` 同一口径。
     const conflict = excludedSubstat(mainAttr);
-    if (conflict) delete weights[conflict];
+    const rows = decodeQuality(p.get('qw'), fallback).rows.filter(
+      (r) => r.attr === '' || r.attr !== conflict,
+    );
     return {
       slot,
       mainAttr,
@@ -439,7 +504,7 @@ export function fromQuery(search: string): AppState {
       initialVisible: iv === 3 || iv === 4 ? iv : fallback.initialVisible,
       targetScore: Number.isFinite(target) && target >= 0 ? target : fallback.targetScore,
       bucketSize: isBucketSize(bucket) ? bucket : fallback.bucketSize,
-      weights,
+      rows,
       theme: p.get('theme') === 'dark' ? 'dark' : 'light',
     };
   } catch {

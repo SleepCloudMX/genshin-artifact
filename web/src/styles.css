@@ -207,7 +207,8 @@ select:focus-visible, input:focus-visible, button:focus-visible {
   outline-offset: 1px;
 }
 
-/* 副词条表：词条 / 权重 / 初始档位 三列；`two-col` 用于不需要档位列的任务 */
+/* 副词条表：词条 / 权重 / 初始档位 三列；
+   `two-col` 用于不需要档位列的任务，`three-col` 是「词条 / 权重 / ×」 */
 .slot-head,
 .slot-row {
   display: grid;
@@ -217,6 +218,8 @@ select:focus-visible, input:focus-visible, button:focus-visible {
 }
 .slot-head.two-col,
 .slot-row.two-col { grid-template-columns: minmax(0, 1fr) 132px; }
+.slot-head.three-col,
+.slot-row.three-col { grid-template-columns: minmax(0, 1fr) 132px 26px; }
 .slot-head {
   font-size: 11.5px;
   color: var(--text-faint);
@@ -225,10 +228,29 @@ select:focus-visible, input:focus-visible, button:focus-visible {
 .slot-head > span:nth-child(2),
 .slot-head > span:nth-child(3) { text-align: center; }
 .slot-row { margin-bottom: 6px; }
-/* 「+ 添加词条」：表格下方左对齐的小按钮（词条加进来才有行，所以入口在表尾） */
+/* 「+ 添加词条」：表格下方左对齐的小按钮（在末尾追加一行，所以入口在表尾） */
 button.ghost.add-row { margin-top: 2px; }
 button.ghost.add-row:disabled { opacity: .45; cursor: not-allowed; border-color: var(--border-strong); }
 button.ghost.add-row:disabled:hover { background: var(--bg-elev); }
+
+/* 行末的删除叉号：**只有它会删行**（权重减到 0 不等于删除） */
+.row-del {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.row-del:hover { background: var(--bg-soft); color: var(--warn); border-color: var(--border-strong); }
 
 /* 权重：− [数字] +。原生 number 的上下箭头又小又难按，而这一列几乎只做小幅微调 */
 .stepper {
