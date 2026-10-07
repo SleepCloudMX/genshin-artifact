@@ -1886,20 +1886,21 @@ export function mount(root: HTMLElement): void {
   const staleTabs = new Set<string>();
 
   /**
-   * 侧边栏的任务树：主任务 + **每个任务**的子任务（默认全展开）。
+   * 侧边栏的任务树：主任务 + **每个任务**的子任务，**全部展开**（没有收起）。
    *
-   * 作者 2026-10-08：「目录需要默认展开所有，并可选择收起。」
-   * —— 逐个任务都能收起（点主任务右边那个小三角），收起状态记在这个集合里，
-   * **不进 URL**（与勾选、看图状态一个规矩）；窄屏时子任务整段隐藏，
-   * 由图表上方那一排负责切换（见 `styles.css` 的 1180px 断点）。
+   * 作者 2026-10-08：「目录需要默认展开所有」→ 后来「把目录中的展开删了吧」：
+   * 既然默认就是全展开，收起那个三角是多余的，删掉。
+   *
+   * **高亮只有一处**：只有**当前任务**那一组里，当前子 tab 才带 `.on`
+   * （作者：「目录中每个主任务下都有一个高亮」是在报错 —— 别的任务记着的子 tab
+   * 不该在目录里亮出来）。
+   *
+   * 窄屏时子任务整段隐藏，由图表上方那一排负责切换（见 `styles.css` 的 1180px 断点）。
    */
-  const collapsed = new Set<string>();
-
   function renderTree(): void {
     tree.replaceChildren();
     for (const tab of TABS) {
       const group = node('div', { class: 'tree-group' });
-      const row = node('div', { class: 'tree-row' });
       const btn = node('button', {
         type: 'button',
         class: tab.id === activeTab ? 'tab on' : 'tab',
@@ -1910,38 +1911,27 @@ export function mount(root: HTMLElement): void {
       });
       btn.textContent = tab.label;
       btn.addEventListener('click', () => selectTab(tab.id, true));
-      row.append(btn);
+      group.append(btn);
 
       const api = subsOf.get(tab.id);
-      const open = !collapsed.has(tab.id);
       if (api) {
-        const caret = node('button', {
-          type: 'button',
-          class: 'tree-caret',
-          'aria-expanded': open ? 'true' : 'false',
-          'aria-label': `${open ? '收起' : '展开'}${tab.label}`,
-          title: open ? '收起' : '展开',
-        });
-        caret.textContent = open ? '▾' : '▸';
-        caret.addEventListener('click', () => {
-          if (open) collapsed.add(tab.id);
-          else collapsed.delete(tab.id);
-          renderTree();
-        });
-        row.append(caret);
-      }
-      group.append(row);
-
-      if (api && open) {
         const list = node('div', { class: 'tree-subs' });
         api.labels.forEach((label, i) => {
+          // **只有当前任务**的那一项能亮（别的任务即使记着自己的子 tab 也不亮）
+          const on = tab.id === activeTab && i === api.index();
           const sub = node('button', {
             type: 'button',
-            class: i === api.index() ? 'tree-sub on' : 'tree-sub',
-            'aria-current': i === api.index() ? 'true' : 'false',
+            class: on ? 'tree-sub on' : 'tree-sub',
+            'aria-current': on ? 'true' : 'false',
           });
           sub.textContent = label;
-          sub.addEventListener('click', () => api.select(i));
+          sub.addEventListener('click', () => {
+            // 子任务属于某个任务：**先切到那个任务**再选子 tab。
+            // 只调 `api.select(i)` 的话，那个任务的面板还是 hidden —— 点了没反应
+            // （作者 2026-10-08 报的「点击另一个主任务的子任务，无法跳转」）。
+            if (tab.id !== activeTab) selectTab(tab.id, true);
+            api.select(i);
+          });
           list.append(sub);
         });
         group.append(list);

@@ -512,45 +512,59 @@ describe('主 tab 与子 tab', () => {
     // 默认全展开：三个任务的子任务都列着（不是只有当前任务）
     expect(subs()).toEqual(['概率分布', '达到概率', '命中次数', '分位分数线', '成长值',
       '组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
+    // **高亮只有一处**：只有当前任务的那一项亮着（作者：「目录中每个主任务下都有一个高亮」
+    // 是在报错 —— 别的任务记着自己的子 tab，但不该在目录里亮出来）
+    expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
+      .toEqual([C.SUB_DIST]);
     // 点侧边栏里的「达到概率」→ 图表上方那一排也跟着选中
     const target = [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-sub')].find(
       (b) => b.textContent === C.SUB_SURVIVAL,
     )!;
     target.click();
     expect(visibleSubPanel(root).querySelector('#survChart svg')).not.toBeNull();
-    const on = root.querySelector('.sidebar .tree-sub.on')!;
-    expect(on.textContent).toBe(C.SUB_SURVIVAL);
-    // 换任务之后**照样是全展开的**，只是高亮跟着走
-    clickTab(root, 'quality');
-    expect(subs()).toEqual(['概率分布', '达到概率', '命中次数', '分位分数线', '成长值',
-      '组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
-    // 每个任务各自记着自己的子 tab：得分分布停在「达到概率」，另两个还在各自的第一个
     expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
-      .toEqual([C.SUB_SURVIVAL, C.SUB_COMBOS, C.SUB_BASIC_WEIGHTS]);
+      .toEqual([C.SUB_SURVIVAL]);
+    // 换任务之后照样是全展开的，高亮仍然只有一处
+    clickTab(root, 'quality');
+    expect(subs()).toHaveLength(10);
+    expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
+      .toEqual([C.SUB_COMBOS]);
   });
 
-  it('每个任务都能单独收起 / 展开（收起状态跨任务切换保留）', () => {
+  it('点**别的任务**的子任务：先切到那个任务，再选中那个子 tab', () => {
+    // 作者 2026-10-08 报的 bug：「点击另一个主任务的子任务，无法跳转（没反应）」——
+    // 目录全展开之后才可能出现这条路：只调那一边的 `select(i)`，
+    // 它所在的任务面板还是 hidden，屏幕上什么都不会变。
     const root = freshRoot();
     mount(root);
-    const carets = () => [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-caret')];
-    const subs = () => [...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent);
-    expect(carets()).toHaveLength(3);
+    const sub = (label: string): HTMLButtonElement =>
+      [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-sub')].find(
+        (b) => b.textContent === label,
+      )!;
 
-    // 收起第一个任务（得分分布）：只剩它的名字，另外两个任务的子项还在
-    carets()[0]!.click();
-    expect(subs()).toEqual(['组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
-    expect(carets()[0]!.getAttribute('aria-expanded')).toBe('false');
-    expect(carets()[0]!.textContent).toBe('▸');
+    sub(C.SUB_ATTRS).click(); // 胚子质量 → 词条概率
+    expect(root.querySelector('.tab-panel:not([hidden])')!.getAttribute('data-tab')).toBe('quality');
+    expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);
+    expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
+      .toEqual([C.SUB_ATTRS]);
+    // 图表上方那一排也跟着切（三个任务各有一排，取**可见**那一排）
+    expect(root.querySelector('.tab-panel:not([hidden]) .subtab.on')!.textContent).toBe(C.SUB_ATTRS);
 
-    // 切到别的任务再切回来：收起状态还在
-    clickTab(root, 'quality');
-    clickTab(root, 'growth');
-    expect(subs()).toHaveLength(5);
+    // 再跨一次，落到基础概率的第二个子 tab
+    sub(C.SUB_BASIC_SUB).click();
+    expect(root.querySelector('.tab-panel:not([hidden])')!.getAttribute('data-tab')).toBe('basic');
+    expect(visibleSubPanel(root).querySelector('#substatHeatmap svg')).not.toBeNull();
+    expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
+      .toEqual([C.SUB_BASIC_SUB]);
+  });
 
-    // 再点一次展开，全部回来
-    carets()[0]!.click();
-    expect(subs()).toHaveLength(10);
-    expect(carets()[0]!.textContent).toBe('▾');
+  it('目录里没有收起 / 展开的开关（作者 2026-10-08：「把目录中的展开删了吧」）', () => {
+    const root = freshRoot();
+    mount(root);
+    expect(root.querySelectorAll('.sidebar .tree-caret')).toHaveLength(0);
+    // 三个任务的子任务一直都在（没有能把它藏起来的东西）
+    clickTab(root, 'basic');
+    expect(root.querySelectorAll('.sidebar .tree-sub')).toHaveLength(10);
   });
 
   it('配置栏在图表**右侧**，且跟着任务走；不需要配置的任务只把这一栏藏起来', () => {
