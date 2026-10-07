@@ -237,65 +237,49 @@ export function qualityScoreAtAlpha(
 }
 
 // ---------------------------------------------------------------------------
-// 饼图分片（组合数多时把长尾并成一块「其他」）
+// 饼图分片（每个组合一片，不做合并）
 // ---------------------------------------------------------------------------
 
 export interface PieSlice {
-  /** 展示名：`暴击 + 暴伤` 或 `其他 12 种组合` */
+  /** 展示名：`暴击 + 暴伤`；空组合是「无有效词条」 */
   label: string;
   p: number;
-  /** 该扇区包含的组合（「其他」扇区会含多个） */
-  combos: QualityCombo[];
-  /** 是否是聚合出来的长尾扇区 */
-  aggregated: boolean;
+  /** 这一片对应的组合 —— **一片就是一个组合**，没有把长尾并起来的扇区 */
+  combo: QualityCombo;
 }
 
 /**
- * 把组合概率整理成饼图分片。
+ * 把组合概率整理成饼图分片：**每个组合单独一片**。
  *
  * 顺序是**画图顺序**：`keep` 的那一项在最前（起点固定在左上角，参考
- * `plot_attr_pie` 的 `startangle=140`），其余**按概率升序**，
- * 「其他」垫底 —— 于是从左上角逆时针走过去扇区越来越大，最大的收在起点旁边。
+ * `plot_attr_pie` 的 `startangle=140`），其余**按概率升序** ——
+ * 于是从左上角逆时针走过去扇区越来越大，最大的收在起点旁边。
  *
- * 概率低于 `minShare`、或超出 `maxSlices` 名额的长尾合并成「其他」。
- * 但 `keep` 指定的那个组合**永远单独成片**（不占名额、不被合并）：
- * 它正是「有效词条全齐」的那一项 —— 概率最小，却常是这张图要回答的问题。
+ * ## 为什么不合并长尾（作者明确要求）
+ *
+ * 早先按「最多 12 片 + 概率 < 0.5% 并成『其他』」处理，作者的评价是：
+ * 「**不要用『其他』，你放『其他』的才是最值得去看的数据。**」
+ * 长尾里正是「四条全齐」「三条全齐」这类最稀有的组合 —— 它们通常也是玩家真正
+ * 想知道的（最高分那一项就在其中），并成一块就再也读不出来了。
+ * 片数多的时候靠**标签避让**与浮框来读，不靠合并。
  *
  * 不变量：所有分片的概率之和 === 所有组合的概率之和（图形不会丢概率）。
  */
 export function pieSlices(
   combos: readonly QualityCombo[],
-  opts: { maxSlices?: number; minShare?: number; keep?: readonly SubAttr[] } = {},
+  opts: { keep?: readonly SubAttr[] } = {},
 ): PieSlice[] {
-  const maxSlices = opts.maxSlices ?? 12;
-  const minShare = opts.minShare ?? 0.005;
   const keep = opts.keep;
-  const sorted = [...combos].sort((x, y) => y.p - x.p);
-
-  const kept = keep && keep.length > 0 ? sorted.find((c) => sameCombo(c.combo, keep)) : undefined;
-  const singles: QualityCombo[] = [];
-  const merged: QualityCombo[] = [];
-  for (const c of sorted) {
-    if (c === kept) continue;
-    if (singles.length < maxSlices && c.p >= minShare) singles.push(c);
-    else merged.push(c);
-  }
-
-  const slices: PieSlice[] = [];
-  if (kept) slices.push({ label: comboLabel(kept.combo), p: kept.p, combos: [kept], aggregated: false });
+  const byProbDesc = [...combos].sort((x, y) => y.p - x.p);
+  const kept =
+    keep && keep.length > 0 ? byProbDesc.find((c) => sameCombo(c.combo, keep)) : undefined;
   // 画图顺序 = 概率升序：从左上角逆时针走过去，扇区越来越大
-  for (const c of singles.sort((x, y) => x.p - y.p)) {
-    slices.push({ label: comboLabel(c.combo), p: c.p, combos: [c], aggregated: false });
-  }
-  if (merged.length > 0) {
-    slices.push({
-      label: `其他 ${merged.length} 种组合`,
-      p: merged.reduce((s, c) => s + c.p, 0),
-      combos: merged,
-      aggregated: true,
-    });
-  }
-  return slices;
+  const rest = byProbDesc.filter((c) => c !== kept).sort((x, y) => x.p - y.p);
+  return (kept ? [kept, ...rest] : rest).map((c) => ({
+    label: comboLabel(c.combo),
+    p: c.p,
+    combo: c,
+  }));
 }
 
 /**
@@ -306,16 +290,6 @@ export function pieSlices(
  */
 export function sameCombo(a: readonly SubAttr[], b: readonly SubAttr[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
-}
-
-/** 组合里有几条有效词条（= 堆叠图与饼图的颜色档） */
-export function comboSize(combo: readonly SubAttr[]): number {
-  return combo.length;
-}
-
-/** 某分片是否含指定词条（用于饼图 / 堆叠图的高亮） */
-export function sliceContains(slice: PieSlice, attr: SubAttr): boolean {
-  return slice.combos.some((c) => c.combo.includes(attr));
 }
 
 // ---------------------------------------------------------------------------

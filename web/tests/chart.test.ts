@@ -762,7 +762,7 @@ describe('环形图', () => {
   const items = [
     { label: '暴击 + 暴伤', p: 0.4 },
     { label: '暴伤 + 大攻击', p: 0.3 },
-    { label: '其他 8 种组合', p: 0.3 },
+    { label: '暴击 + 精通', p: 0.3 },
   ];
 
   it('概率 > 0 的分片都画出来', () => {
@@ -788,15 +788,21 @@ describe('环形图', () => {
     expect([...svg.querySelectorAll('text.pie-label')].map((n) => n.textContent)).toEqual([
       '暴击 + 暴伤',
       '暴伤 + 大攻击',
-      '其他 8 种组合',
+      '暴击 + 精通',
     ]);
     // 宽度够的扇区：百分比画在圆环里（半径约 0.8R），不占图外的位置
-    const center = 90;
+    const center = 92;
     for (const t of svg.querySelectorAll('text.pie-pct')) {
-      const d = Math.hypot(Number(t.getAttribute('x')) - center, Number(t.getAttribute('y')) - 55);
+      const d = Math.hypot(Number(t.getAttribute('x')) - center, Number(t.getAttribute('y')) - 58);
       expect(d).toBeGreaterThan(15);
-      expect(d).toBeLessThan(30);
+      expect(d).toBeLessThan(32);
     }
+  });
+
+  it('扇区按分类色盘取色：颜色柔和，相邻两块不同色', () => {
+    const svg = renderPie({ items, title: 't', tooltip: makeTooltip() });
+    const fills = [...svg.querySelectorAll('path.pie-slice')].map((p) => p.getAttribute('fill'));
+    expect(fills).toEqual([categoricalColor(0), categoricalColor(1), categoricalColor(2)]);
   });
 
   it('起点固定在左上角：第一块从 140° 开始铺', () => {
@@ -814,8 +820,8 @@ describe('环形图', () => {
     // 起点在左上：从 140° 铺 90° 的扇区，「a」的首个顶点应落在中心的左上象限
     const first = two.querySelector('path.pie-slice')!.getAttribute('d')!;
     const m = /^M([\d.]+),([\d.]+)/.exec(first)!;
-    expect(Number(m[1])).toBeLessThan(90); // 在竖直中线左侧
-    expect(Number(m[2])).toBeLessThan(55); // 在水平中线之上
+    expect(Number(m[1])).toBeLessThan(92); // 在竖直中线左侧
+    expect(Number(m[2])).toBeLessThan(58); // 在水平中线之上
   });
 
   it('窄到写不下百分比的扇区，把百分比写到图外第二行', () => {
@@ -831,8 +837,8 @@ describe('环形图', () => {
     const pcts = [...svg.querySelectorAll('text.pie-pct')];
     expect(pcts).toHaveLength(2);
     const radius = (n: Element): number =>
-      Math.hypot(Number(n.getAttribute('x')) - 90, Number(n.getAttribute('y')) - 55);
-    const outside = pcts.filter((n) => radius(n) > 30);
+      Math.hypot(Number(n.getAttribute('x')) - 92, Number(n.getAttribute('y')) - 58);
+    const outside = pcts.filter((n) => radius(n) > 32);
     expect(outside).toHaveLength(1);
     expect(outside[0]!.textContent).toBe('2.00%');
   });

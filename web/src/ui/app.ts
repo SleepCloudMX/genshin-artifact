@@ -1267,30 +1267,18 @@ export function mount(root: HTMLElement): void {
             if (!dist) return;
 
             const top = topComboOf(dist);
-            const slices = pieSlices(dist.combos, {
-              maxSlices: 8,
-              minShare: 0.005,
-              ...(top ? { keep: top } : {}),
-            });
+            // **每个组合一片**，不做「其他」合并：长尾里那些「几条全齐」的组合
+            // 正是这张图最值得看的东西（作者点名）。
+            const slices = pieSlices(dist.combos, top ? { keep: top } : {});
             pieBox.append(
               renderPie({
-                items: slices.map((s) => {
-                  const single = s.combos.length === 1 ? s.combos[0] : undefined;
-                  return {
-                    label: s.label,
-                    p: s.p,
-                    // 浮框里只放图上读不到的：单个组合 → 它值多少分；
-                    // 「其他」→ 里面合并了哪些组合（图上只有一个扇区）
-                    rows: single
-                      ? [{ label: '得分', value: `${single.score} 分` }]
-                      : s.combos
-                          .slice()
-                          .sort((x, y) => y.p - x.p)
-                          .slice(0, 6)
-                          .map((c) => ({ label: comboLabel(c.combo), value: pct(c.p) })),
-                    ...(top && single && sameCombo(single.combo, top) ? { explode: true } : {}),
-                  };
-                }),
+                items: slices.map((s) => ({
+                  label: s.label,
+                  p: s.p,
+                  // 浮框里只放图上读不到的：名字与概率图上都有，这里给「这一项值多少分」
+                  rows: [{ label: '得分', value: `${s.combo.score} 分` }],
+                  ...(top && sameCombo(s.combo.combo, top) ? { explode: true } : {}),
+                })),
                 title: C.SUB_COMBOS,
                 tooltip: tabCtx.tooltip,
               }),

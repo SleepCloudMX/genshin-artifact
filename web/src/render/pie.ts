@@ -20,7 +20,7 @@
  */
 
 import { pct } from '../ui/format';
-import { hitColor } from './charts';
+import { categoricalColor } from './charts';
 import type { Tooltip, TooltipRow } from './tooltip';
 
 export interface PieDatum {
@@ -28,14 +28,14 @@ export interface PieDatum {
   label: string;
   /** 概率（分片之和应为 1） */
   p: number;
-  /** 颜色；省略则按索引取默认配色 */
+  /** 颜色；省略则按索引取分类色盘（`charts.CATEGORICAL_COLORS`） */
   color?: string;
   /** 是否从圆心「摘出来」（「组合概率」里是有效词条全齐、得分最高的那一项） */
   explode?: boolean;
   /**
    * 悬停时补在标题行下面的几行。
    *
-   * **只放这张图上读不到的**（如「得分 = 10」、或「其他」里都合并了哪些组合）——
+   * **只放这张图上读不到的**（如「得分 = 10」）——
    * 名字与概率已经在图上标出来了，再往浮框里抄一遍就是废话。
    */
   rows?: TooltipRow[];
@@ -50,12 +50,12 @@ export interface PieOptions {
 }
 
 const NAMESPACE = 'http://www.w3.org/2000/svg';
-/** 画布是横的：左右各留出名字的位置 */
-const VIEW_W = 180;
-const VIEW_H = 110;
+/** 画布是横的：左右各留出名字的位置。片数多时（16 片）标签列会很高，所以画得高一点 */
+const VIEW_W = 184;
+const VIEW_H = 116;
 const CX = VIEW_W / 2;
 const CY = VIEW_H / 2;
-const R = 32;
+const R = 34;
 /** 起点：左上角（与 matplotlib 的 `startangle=140` 同一个位置） */
 const START_DEG = 140;
 /** 摘出来的扇区沿中缝外移多少 */
@@ -65,9 +65,9 @@ const LABEL_R = R + 5;
 /** 圆环里百分比所在半径 */
 const PCT_R = 0.8;
 /** 同侧标签之间的最小竖直间距 */
-const MIN_GAP = 8;
+const MIN_GAP = 6.4;
 /** 图外标签是一行还是两行 */
-const LINE_H = 5.6;
+const LINE_H = 5.2;
 
 function svgEl<K extends keyof SVGElementTagNameMap>(
   tag: K,
@@ -132,18 +132,18 @@ function dodge(slices: Slice[]): void {
   for (let i = 1; i < slices.length; i++) {
     const prev = slices[i - 1]!;
     const cur = slices[i]!;
-    const need = prev.pctInside && cur.pctInside ? MIN_GAP : MIN_GAP + LINE_H;
-    if (cur.y - prev.y < need) cur.y = prev.y + need;
+    if (cur.y - prev.y < MIN_GAP) cur.y = prev.y + MIN_GAP;
   }
+  // 标签都是**一行**（名字 + 百分比各占一列），所以半高就是 LINE_H / 2
+  const half = LINE_H / 2;
   const last = slices[slices.length - 1];
   const first = slices[0];
-  const half = (s: Slice): number => (s.pctInside ? LINE_H / 2 : LINE_H);
-  if (last && last.y + half(last) > VIEW_H - 3) {
-    const shift = last.y + half(last) - (VIEW_H - 3);
+  if (last && last.y + half > VIEW_H - 2) {
+    const shift = last.y + half - (VIEW_H - 2);
     for (const s of slices) s.y -= shift;
   }
-  if (first && first.y - half(first) < 3) {
-    const shift = 3 - (first.y - half(first));
+  if (first && first.y - half < 2) {
+    const shift = 2 - (first.y - half);
     for (const s of slices) s.y += shift;
   }
 }
@@ -199,7 +199,7 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
   for (const s of slices) {
     const path = svgEl('path', {
       d: arcPath(s.fromDeg, s.toDeg, innerR),
-      fill: s.datum.color ?? hitColor(s.index),
+      fill: s.datum.color ?? categoricalColor(s.index),
       class: 'pie-slice',
       'data-slice': String(s.index),
     });
@@ -240,7 +240,7 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
     svg.append(value);
   }
 
-  // --- 图外的名字（+ 写不下时才跟一行百分比） ---
+  // --- 图外的名字：一行之内「名字 + 百分比」两列，百分比贴着引线（照参考图） ---
   for (const s of slices) {
     const [wx, wy] = point(R + s.offset, s.midDeg);
     // 引线是**径向**的：从扇区外缘直着连到标签，不绕水平段
@@ -252,25 +252,28 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
       }),
     );
     const inward = s.side === 'right' ? 1.6 : -1.6;
-    const name = svgEl('text', {
-      x: f(s.x + inward),
-      y: f(s.pctInside ? s.y + 1.1 : s.y - 0.4),
-      class: 'pie-label',
-      'text-anchor': s.side === 'right' ? 'start' : 'end',
-      'data-slice': String(s.index),
-    });
-    name.textContent = s.datum.label;
-    svg.append(name);
-    if (!s.pctInside) {
-      const value = svgEl('text', {
-        x: f(s.x + inward),
-        y: f(s.y + 4.6),
-        class: 'pie-pct',
-        'text-anchor': s.side === 'right' ? 'start' : 'end',
+    const anchor = s.side === 'right' ? 'start' : 'end';
+    const baseline = s.y + 1.1;
+    const put = (content: string, x: number, cls: string): void => {
+      const t = svgEl('text', {
+        x: f(x),
+        y: f(baseline),
+        class: cls,
+        'text-anchor': anchor,
         'data-slice': String(s.index),
       });
-      value.textContent = pct(s.frac, 2);
-      svg.append(value);
+      t.textContent = content;
+      svg.append(t);
+    };
+    const value = pct(s.frac, 2);
+    if (s.pctInside) {
+      // 宽度够：百分比画在圆环里，图外只留名字
+      put(s.datum.label, s.x + inward, 'pie-label');
+    } else {
+      // 写不下：百分比挪到图外，但仍在引线这一侧、名字的外面 —— 一行放得下
+      const w = value.length * 1.8;
+      put(value, s.x + inward, 'pie-pct');
+      put(s.datum.label, s.x + inward + (s.side === 'right' ? w + 2 : -(w + 2)), 'pie-label');
     }
   }
 

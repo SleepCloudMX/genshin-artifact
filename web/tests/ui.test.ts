@@ -672,6 +672,25 @@ describe('主 tab 与子 tab', () => {
     expect(pie.textContent).not.toContain('分');
   });
 
+  it('组合概率：16 个组合各占一片，长尾不并成「其他」', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const pie = visibleSubPanel(root).querySelector('svg.pie')!;
+    // 默认 4 条有效词条 → 2^4 = 16 个组合，全部单独成片
+    expect(pie.querySelectorAll('path.pie-slice')).toHaveLength(16);
+    expect(pie.textContent).not.toContain('其他');
+    // 最稀有的那一项（四条全齐）自己就有名字与百分比
+    const names = [...pie.querySelectorAll('text.pie-label')].map((n) => n.textContent!);
+    const all = names.filter((t) => ['暴击', '暴伤', '精通', '大攻击'].every((a) => t.includes(a)));
+    expect(all).toHaveLength(1);
+    // 概率之和 = 1：把圆环里的百分比加起来（16 片都是 2 位小数）
+    const sum = [...pie.querySelectorAll('text.pie-pct')]
+      .map((n) => Number((n.textContent ?? '0').replace('%', '')))
+      .reduce((s, v) => s + v, 0);
+    expect(sum).toBeCloseTo(100, 1);
+  });
+
   it('胚子质量的权重表：只列正在计分的词条（0 的行不显示），每行带词条下拉', () => {
     const root = freshRoot();
     mount(root);

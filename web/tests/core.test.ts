@@ -19,7 +19,13 @@ import {
   type MainAttr,
   type SubAttr,
 } from '../src/core/stats';
-import { dropProbability, qualityDistribution, qualityProbContaining } from '../src/core/quality';
+import {
+  dropProbability,
+  qualityDistribution,
+  qualityProbContaining,
+  pieSlices,
+  sameCombo,
+} from '../src/core/quality';
 import { exact4ComboProb, attrsProb, allPossibleAttrsProb, combinations } from '../src/core/combo';
 import {
   scoreDistribution,
@@ -526,6 +532,38 @@ describe('勾选词条的合计（质量分布图右上角那个数）', () => {
 
   it('勾 5 条时为 0（终态只有 4 条副词条）', () => {
     expect(qualityProbContaining(d, ['暴击', '暴伤', '精通', '大攻击', '充能'])).toBe(0);
+  });
+});
+
+describe('饼图分片（组合概率）', () => {
+  const d = qualityDistribution({
+    mainAttr: '火伤',
+    weights: { 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 },
+  });
+  const keep: SubAttr[] = ['暴击', '暴伤', '精通', '大攻击'];
+
+  it('每个组合一片：不合并长尾，概率之和仍是 1', () => {
+    const slices = pieSlices(d.combos, { keep });
+    expect(slices).toHaveLength(d.combos.length);
+    expect(slices).toHaveLength(16); // 2^4
+    expect(slices.reduce((s, x) => s + x.p, 0)).toBeCloseTo(1, 12);
+    expect(slices.some((s) => s.label.includes('其他'))).toBe(false);
+  });
+
+  it('画图顺序：keep 在最前，其余按概率升序（左上角起步、扇区越来越大）', () => {
+    const slices = pieSlices(d.combos, { keep });
+    expect(sameCombo(slices[0]!.combo.combo, keep)).toBe(true);
+    const rest = slices.slice(1).map((s) => s.p);
+    for (let i = 1; i < rest.length; i++) expect(rest[i]!).toBeGreaterThanOrEqual(rest[i - 1]!);
+    // keep 那一项概率最小 —— 这正是它必须被摘出来的原因
+    expect(slices[0]!.p).toBeLessThanOrEqual(rest[0]!);
+  });
+
+  it('不给 keep 时就是全部按概率升序', () => {
+    const slices = pieSlices(d.combos);
+    expect(slices).toHaveLength(16);
+    const ps = slices.map((s) => s.p);
+    for (let i = 1; i < ps.length; i++) expect(ps[i]!).toBeGreaterThanOrEqual(ps[i - 1]!);
   });
 });
 
