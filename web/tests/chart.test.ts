@@ -418,13 +418,13 @@ describe('分类柱状图', () => {
     expect(svg.querySelectorAll('rect.hot-rect')).toHaveLength(3);
   });
 
-  it('浮框：数值进 badge（纵轴已经是概率），标题可另给带单位的写法', () => {
+  it('浮框：数值进 badge（纵轴已经是概率），标题就是轴上的标号', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
     host.append(
       renderHistogram({
-        items: [{ label: '4.0', title: '4.0 分', value: 0.1315, rows: [{ label: '暴击', value: '13.15%' }] }],
+        items: [{ label: '命中 2 次', value: 0.4 }],
         title: 't',
         tooltip,
       }),
@@ -433,12 +433,11 @@ describe('分类柱状图', () => {
       .querySelectorAll('rect.hot-rect')[0]!
       .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     const tt = host.querySelector('.tooltip')!;
-    expect(tt.querySelector('.tt-title')!.textContent).toBe('4.0 分');
-    expect(tt.querySelector('.tt-badge')!.textContent).toBe('13.15%');
+    expect(tt.querySelector('.tt-title')!.textContent).toBe('命中 2 次');
+    expect(tt.querySelector('.tt-badge')!.textContent).toBe('40.00%');
     // 不再有一行叫「概率」的（纵轴就是概率），也不再有「说明」这种占位标签
     expect(tt.textContent).not.toContain('概率');
     expect(tt.textContent).not.toContain('说明');
-    expect(occurrences(tt.textContent!, '13.15%')).toBe(2); // badge + 「暴击」那一行
   });
 });
 

@@ -613,27 +613,18 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelectorAll('[data-tab="more"] ul.todo li').length).toBeGreaterThan(0);
   });
 
-  it('胚子质量页有四个子 tab，「组合概率」在第一个', () => {
+  it('胚子质量页有三个子 tab，「组合概率」在第一个', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    expect(subLabels(root)).toEqual([
-      C.SUB_COMBOS,
-      C.SUB_QUALITY_DIST,
-      C.SUB_QUALITY_DETAIL,
-      C.SUB_ATTRS,
-    ]);
+    expect(subLabels(root)).toEqual([C.SUB_COMBOS, C.SUB_QUALITY_DIST, C.SUB_ATTRS]);
     // 默认只渲染第一个：组合概率的饼
     expect(visibleSubPanel(root).querySelectorAll('svg.pie path.pie-slice').length).toBeGreaterThan(0);
 
     clickSub(root, C.SUB_QUALITY_DIST);
-    expect(visibleSubPanel(root).querySelector('svg')).not.toBeNull();
-
-    clickSub(root, C.SUB_QUALITY_DETAIL);
-    expect(
-      visibleSubPanel(root).querySelectorAll('#qualityDetail rect.bar-seg').length,
-    ).toBeGreaterThan(0);
-    expect(visibleSubPanel(root).querySelector('#qualityDetail path.cum-line')).not.toBeNull();
+    const dist = visibleSubPanel(root);
+    expect(dist.querySelectorAll('#qualityDist rect.bar-seg').length).toBeGreaterThan(0);
+    expect(dist.querySelector('#qualityDist path.cum-line')).not.toBeNull();
 
     clickSub(root, C.SUB_ATTRS);
     expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);

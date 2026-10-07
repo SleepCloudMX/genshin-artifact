@@ -651,10 +651,6 @@ export interface HistogramItem {
   label: string;
   value: number;
   color?: string;
-  /** 浮框标题；省略则用 `label`（轴上放得下 `2.0`，浮框里要写「2.0 分」时用这个） */
-  title?: string | undefined;
-  /** 浮框里额外补的几行（**只放图上读不到的**） */
-  rows?: TooltipRow[] | undefined;
 }
 
 export interface HistogramOptions {
@@ -740,9 +736,9 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       tooltip.show(
         {
           // 纵轴就是「概率」，所以数值进 badge，不再另起一行叫「概率」
-          title: d.title ?? d.label,
+          title: d.label,
           badge: format(d.value),
-          rows: d.rows ?? [],
+          rows: [],
         },
         ev.clientX,
         ev.clientY,

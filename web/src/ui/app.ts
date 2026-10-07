@@ -1196,46 +1196,17 @@ export function mount(root: HTMLElement): void {
           },
         },
         {
-          label: C.SUB_QUALITY_DIST,
-          render(box) {
-            const p = panel('', C.QUALITY_DIST_HINT);
-            p.box.classList.add('flush');
-            const chart = node('div', { class: 'chart-wrap' });
-            p.body.append(chart);
-            box.append(p.box);
-            if (!dist) return;
-            const buckets = dist.buckets.filter((b) => b.score > 0);
-            chart.append(
-              renderHistogram({
-                items: (buckets.length > 0 ? buckets : dist.buckets).map((b) => ({
-                  label: fmtScore(b.score),
-                  title: `${fmtScore(b.score)} 分`,
-                  value: b.p,
-                  // 这一分数由哪些组合同分凑出来 —— 图上一根柱子看不出来，浮框里补上
-                  rows: b.combos
-                    .slice()
-                    .sort((x, y) => y.p - x.p)
-                    .map((c) => ({ label: comboLabel(c.combo), value: pct(c.p) })),
-                })),
-                title: C.AXIS_SCORE,
-                host: chart,
-                tooltip: tabCtx.tooltip,
-              }),
-            );
-          },
-        },
-        {
           /**
-           * 质量分布（详细）：每根柱子按「是哪几条词条的组合」拆开堆叠，
+           * 质量分布：每根柱子按「是哪几条词条的组合」拆开堆叠，
            * 再叠一条累计概率曲线。参考 `docs/ai-ref/v1/init_stats/暴伤/质量分布-详细-1.png`。
            *
            * 上面那排勾选框对应「有效词条」：勾上就把它所在的**子柱子**（组合段）
            * 挑出来、其余压暗 —— 参考图的 `highlight_comb` 就是这个用法。
            * 勾选状态是**看图用的，不进 URL**（换个链接不该带着别人的高亮）。
            */
-          label: C.SUB_QUALITY_DETAIL,
+          label: C.SUB_QUALITY_DIST,
           render(box) {
-            const p = panel('', C.QUALITY_DETAIL_HINT);
+            const p = panel('', C.QUALITY_DIST_HINT);
             p.box.classList.add('flush');
 
             const tools = node('div', { class: 'chart-tools checks' });
@@ -1252,7 +1223,7 @@ export function mount(root: HTMLElement): void {
               tools.append(lab);
             }
 
-            const chart = node('div', { class: 'chart-wrap', id: 'qualityDetail' });
+            const chart = node('div', { class: 'chart-wrap', id: 'qualityDist' });
             p.body.append(tools, chart);
             box.append(p.box);
             if (!dist) return;

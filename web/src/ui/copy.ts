@@ -91,7 +91,6 @@ export const SUB_HITS = '命中次数';
 export const SUB_QUANTILE = '分位分数线';
 export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
-export const SUB_QUALITY_DETAIL = '质量分布（详细）';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
 
@@ -161,7 +160,6 @@ export function scoreChartTitle(mainAttr: string, initial: number): string {
   return `${mainAttr}主词条 · ${initial} 词条胚子`;
 }
 export const SCORE_CHART_HINT = '柱高 = 该分数的概率；颜色 = 命中的有效词条次数。悬停看明细。';
-export const AXIS_SCORE = '得分（分）';
 export const AXIS_SCORE_LINE = '分数线（分）';
 export const SURVIVAL_TITLE = 'P(得分 ≥ 分数线)';
 export const SURVIVAL_HINT = '纵轴为独立 0~100%，不与上图共用比例。';
@@ -192,10 +190,16 @@ export function topPercent(alpha: number): string {
   return `前 ${alpha * 100}%`;
 }
 
-export const QUALITY_DIST_HINT = '仅统计掉落瞬间的 4 个副词条，不含强化成长。';
+/**
+ * 质量分布（堆叠柱 + 累计概率）。
+ *
+ * 前一句是这一页与「得分分布」的口径差别；后两句交代图上读不出来的事：
+ * 柱子按什么拆、红线读哪根轴。
+ */
+export const QUALITY_DIST_HINT =
+  '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，' +
+  '颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。';
 export const COMBOS_HINT = '得分最高的那一项已摘出并固定在左上角；概率过小的长尾合并为「其他」。';
-export const QUALITY_DETAIL_HINT =
-  '柱内按组合拆开，颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。勾选词条可高亮对应组合。';
 export const ATTRS_HINT = '「胚子含该词条」的概率；词条不重复，故不等于权重占比。';
 export const TH_ATTR = '词条';
 export const TH_ATTR_PROB = '出现概率';
