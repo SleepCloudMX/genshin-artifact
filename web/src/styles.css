@@ -68,7 +68,10 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
-#app { max-width: 1400px; margin: 0 auto; padding: 26px 22px 72px; }
+/* 整页**贴着窗口两边**（作者 2026-10-08：左目录靠左、右配置靠右，宽度让给中间的图）。
+   早先是 `max-width: 1400px` 居中 + 22px 内边距，宽屏上左右各白扔一大条；
+   留 12px 只是为了不让圆角高亮和面板边框真的顶到窗口边缘。 */
+#app { max-width: none; margin: 0; padding: 22px 12px 72px; }
 
 /* ---------- 头部 ---------- */
 .hero { margin-bottom: 20px; }
@@ -79,7 +82,6 @@ html, body {
   flex-wrap: wrap;
 }
 .hero h1 { margin: 0; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: .2px; }
-.lede { margin: 6px 0 0; color: var(--text-dim); max-width: 76ch; font-size: 14px; }
 
 /* 标题行右侧的图标组（源码链接 + 主题切换）。靠右对齐靠这一层，不是靠单个按钮 */
 .title-actions {
@@ -415,10 +417,16 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
   .sidebar .tree-subs { display: none; }
 }
 
-.tab-blurb {
+/* 中间那一栏顶上的小标题：写着当前任务的**名字**（「得分分布」/「胚子质量」）。
+   居中对齐，与下面那排子 tab、图表形成一条竖轴线；窄屏侧边栏收成横条时，
+   它就是唯一的位置提示。 */
+.tab-title {
   margin: 0 0 14px;
-  font-size: 13px;
-  color: var(--text-dim);
+  text-align: center;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: .3px;
+  color: var(--text);
 }
 
 .tab-panel[hidden] { display: none; }

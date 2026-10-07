@@ -12,9 +12,6 @@
 
 export const APP_TITLE = '圣遗物词条概率分布';
 
-/** 一句话定位。只保留必要信息，去掉「不是 X 而是 Y」这种修辞 */
-export const APP_LEDE = '计算胚子练满 +20 后的得分分布，以及掉落时的胚子质量。';
-
 export const THEME_TO_LIGHT = '切换到浅色主题';
 export const THEME_TO_DARK = '切换到深色主题';
 
@@ -90,15 +87,12 @@ export function ignoredNote(attrs: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// 主 tab
+// 主 tab（界面上一级任务；侧边栏里那一层，正文顶上那个小标题也是它）
 // ---------------------------------------------------------------------------
 
 export const TAB_GROWTH = '得分分布';
 export const TAB_QUALITY = '胚子质量';
 export const TAB_MORE = '更多';
-
-export const GROWTH_BLURB = '练满 +20 后的得分分布（含 5 次成长）。';
-export const QUALITY_BLURB = '掉落时、未强化的得分分布（不含成长）。';
 
 // ---------------------------------------------------------------------------
 // 子 tab

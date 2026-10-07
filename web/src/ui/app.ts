@@ -3,9 +3,10 @@
  *
  * ## 结构
  *
- * 顶部是标题栏（标题 + 主题图标）。下面是**三栏**：
+ * 顶部是标题栏（标题 + 主题图标）。下面是**三栏**（两侧贴着窗口边缘，把宽度让给中间的图）：
  *   - 左：**任务树**（主任务 + 它下面的子任务）；
- *   - 中：结果，按**子 tab** 分页——每张图一个子 tab，切换即可，不用滚动；
+ *   - 中：结果，顶上一个小标题写着当前任务名，下面按**子 tab** 分页——每张图一个子 tab，
+ *     切换即可，不用滚动；
  *   - 右：**这个任务的**配置（`Tab.controls`；不需要配置的任务整栏收掉）。
  *
  * ## 为什么配置按 tab 分
@@ -312,7 +313,6 @@ interface SubsApi {
 interface Tab {
   id: string;
   label: string;
-  blurb: string;
   /**
    * 左栏……不，是**右栏**：这个任务需要什么配置。
    *
@@ -359,7 +359,7 @@ export function mount(root: HTMLElement): void {
   titleActions.append(repoLink, themeBtn);
   titleRow.append(titleActions);
 
-  hero.append(titleRow, node('p', { class: 'lede' }, C.APP_LEDE));
+  hero.append(titleRow);
   root.append(hero);
 
   // ---- 三栏：任务树 / 图表 / 这个任务的配置 ----
@@ -1062,7 +1062,6 @@ export function mount(root: HTMLElement): void {
   const growthTab: Tab = {
     id: 'growth',
     label: C.TAB_GROWTH,
-    blurb: C.GROWTH_BLURB,
 
     controls(host) {      const form = node('form', { class: 'panel sticky', id: 'form' });
       form.addEventListener('submit', (ev) => ev.preventDefault());
@@ -1365,7 +1364,6 @@ export function mount(root: HTMLElement): void {
   const qualityTab: Tab = {
     id: 'quality',
     label: C.TAB_QUALITY,
-    blurb: C.QUALITY_BLURB,
 
     controls(host) {
       const form = node('form', { class: 'panel sticky', id: 'form' });
@@ -1643,7 +1641,6 @@ export function mount(root: HTMLElement): void {
   const moreTab: Tab = {
     id: 'more',
     label: C.TAB_MORE,
-    blurb: '',
     // **不需要配置**：侧边栏这一页右边那一栏会整栏收掉（`selectTab` 里判断）
     mount(host) {
       const p = panel(C.MORE_TITLE);
@@ -1832,7 +1829,10 @@ export function mount(root: HTMLElement): void {
       'aria-labelledby': `tab-${tab.id}`,
       'data-tab': tab.id,
     });
-    if (tab.blurb) panel.append(node('p', { class: 'tab-blurb' }, tab.blurb));
+    // 正文顶上的小标题 = 当前任务的**名字**（作者 2026-10-08：中间上方要有个小标题）。
+    // 侧边栏在窄屏会收成一行横条，标题就是那时唯一的位置提示。
+    // 各页原有的「这一页在算什么」那句话被作者删掉了（两句都嫌费解），所以这里只写名字。
+    panel.append(node('h2', { class: 'tab-title' }, tab.label));
     panel.hidden = true;
     panelHost.append(panel);
     tab.mount(panel, { ...ctx, reportSubs: (api) => subsOf.set(tab.id, api) });

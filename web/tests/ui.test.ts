@@ -1154,6 +1154,30 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
 describe('页面文案', () => {
   beforeEach(() => resetUrl());
 
+  it('中间栏顶上写着当前任务名，切任务跟着换', () => {
+    const root = freshRoot();
+    mount(root);
+    const title = () => root.querySelector('.tab-panel:not([hidden]) .tab-title')!.textContent;
+    expect(title()).toBe(C.TAB_GROWTH);
+    clickTab(root, 'quality');
+    expect(title()).toBe(C.TAB_QUALITY);
+    clickTab(root, 'more');
+    expect(title()).toBe(C.TAB_MORE);
+    // 每个面板各有一条，不是共用的一个标题被搬来搬去
+    expect(root.querySelectorAll('.tab-title')).toHaveLength(3);
+  });
+
+  it('标题下那句「计算胚子练满 +20 …」和两页的说明句都删了', () => {
+    const root = freshRoot();
+    mount(root);
+    // 作者 2026-10-08：「删了，废话」/「删了，莫名其妙，这跟强化不强化压根就没关系」
+    expect(root.querySelector('.hero .lede')).toBeNull();
+    expect(root.querySelector('.tab-blurb')).toBeNull();
+    expect(root.querySelector('.hero')!.textContent).not.toContain('计算胚子练满');
+    // 「未强化」这个说法整页都不该再出现
+    expect(root.textContent).not.toContain('未强化');
+  });
+
   it('没有「复制链接」按钮（配置本来就能写进 URL，按钮多余）', () => {
     const root = freshRoot();
     mount(root);
