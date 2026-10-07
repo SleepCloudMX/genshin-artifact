@@ -16,6 +16,8 @@
   --accent: #2563eb;
   --accent-soft: #e8efff;
   --accent-2: #0d9488;
+  /* 强调用的暖色（组合概率里「得分最高那一项」的文字） */
+  --accent-warm: #d9480f;
   --warn: #b45309;
   --err: #d92d20;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 4%);
@@ -39,6 +41,7 @@
   --accent: #6ea8fe;
   --accent-soft: #1b2740;
   --accent-2: #2dd4bf;
+  --accent-warm: #ffa94d;
   --warn: #fbbf24;
   --err: #f87171;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%);
@@ -494,6 +497,8 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .pie-leader { fill: none; stroke: var(--border-strong); stroke-width: .35; }
 .pie-label { fill: var(--text); font-size: 3.2px; }
 .pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }
+/* 摘出来的那一块（得分最高的组合）：文字换成橙色，一眼能看见 */
+.pie-label[data-top], .pie-pct[data-top] { fill: var(--accent-warm); }
 
 /* 质量分布：柱内标注 + 累计概率曲线 + 勾选高亮 */
 /* 段色是浅色（见 charts.CATEGORICAL_COLORS），所以段内文字用深色 —— 浅底上白字看不清，
@@ -513,9 +518,11 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .cum-label { fill: #e74c3c; font-size: 10px; font-family: var(--mono); }
 /* 右轴名竖排（画在图的右边缘中段），把右上角让给「含勾选词条的比例」角标 */
 .cum-title { fill: #e74c3c; font-size: 11px; }
-/* 图内右上角的角标：勾选了哪几条 + 同时含这几条的概率 */
+/* 图内右上角的角标：勾选了哪几条 + 同时含这几条的概率。
+   加一个底框把它框住 —— 光靠一行文字在图上不够显眼（作者要求）。 */
+.pick-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: .8; }
 .pick-label { fill: var(--text-dim); font-size: 11px; }
-.pick-value { fill: var(--text); font-size: 12px; font-weight: 650; font-family: var(--mono); }
+.pick-value { fill: var(--accent); font-size: 12px; font-weight: 650; font-family: var(--mono); }
 
 /* 图内工具条上的勾选框（「质量分布」用） */
 .chart-tools.checks { gap: 4px 14px; }
@@ -562,6 +569,13 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .tt-sub { color: var(--text-dim); font-size: 11.5px; margin-bottom: 6px; }
 .tt-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
 .tt-row { display: flex; align-items: center; gap: 7px; }
+/* 与上面几行不同类别的行（如「累计概率」——它读的是另一条曲线、另一个量纲）：
+   拉开一道分隔线，免得看起来像同一批数（作者要求）。 */
+.tt-row.tt-row-sep {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
 .tt-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
 .tt-label { color: var(--text-dim); white-space: nowrap; }
 .tt-value { margin-left: auto; font-family: var(--mono); white-space: nowrap; }

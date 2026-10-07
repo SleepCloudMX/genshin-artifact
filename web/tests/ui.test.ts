@@ -823,15 +823,18 @@ describe('主 tab 与子 tab', () => {
     expect(readQualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2 });
   });
 
-  it('副词条不能与主词条重复：表里已有的词条在下拉里灰掉', () => {
+  it('副词条不能与主词条重复：表里已有的词条在下拉里**不再列出**', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
     const opts = [...qualityRow(root, '大攻击').sel.options];
-    const taken = opts.find((o) => o.value === '暴击')!;
-    expect(taken.disabled).toBe(true);
-    // 自己那一项当然可选
-    expect(opts.find((o) => o.value === '大攻击')!.disabled).toBe(false);
+    // 作者：列出来却点不了是反人类设计 —— 已占用的词条直接不给选项
+    expect(opts.map((o) => o.value)).not.toContain('暴击');
+    expect(opts.map((o) => o.value)).not.toContain('暴伤');
+    // 自己那一项当然在（否则下拉的当前值对不上 state）
+    expect(opts.map((o) => o.value)).toContain('大攻击');
+    // 没被占用的照常提供
+    expect(opts.map((o) => o.value)).toContain('充能');
   });
 
   it('主词条换成暴击后，暴击那一行从表里消失、下拉里也不再提供它', () => {

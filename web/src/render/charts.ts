@@ -76,6 +76,25 @@ export function niceAxis(max: number, targetTicks = 4): { max: number; step: num
 }
 
 /**
+ * 纵轴上限**贴着最高的柱子**（只留一点余量放柱顶标注），刻度仍取整齐步长。
+ *
+ * 与 `niceAxis` 的区别在「上限」：`niceAxis` 把上限抬到步长的整数倍，
+ * 最高 31.97% 的柱子会得到一个 40% 的轴 —— 上面空出一大截，柱子被压矮，
+ * 作者的原话是「你为什么要固定最高 40%？按最高的柱子来，比它稍高一点就行」。
+ * 这里改成 `峰值 × 余量`，刻度线只画到不超过上限的那些，
+ * 于是最上面一条网格线可能略低于图顶（正常的画法），标签仍是整齐的整百分数。
+ */
+export function tightAxis(
+  peak: number,
+  headroom = 1.06,
+  targetTicks = 4,
+): { max: number; step: number } {
+  if (!(peak > 0) || !Number.isFinite(peak)) return { max: 1, step: 0.25 };
+  const max = peak * headroom;
+  return { max, step: niceAxis(max, targetTicks).step };
+}
+
+/**
  * 取 X 轴要标注的下标：最多 `maxLabels` 个，均匀分布且**必含首尾**。
  * 用「均分的刻度」而不是旋转 45° 的文字——分数有 200+ 个时旋转标签会糊成一片。
  *
@@ -797,6 +816,26 @@ export function categoricalColor(index: number): string {
   return CATEGORICAL_COLORS[index % CATEGORICAL_COLORS.length]!;
 }
 
+/**
+ * 把颜色往白色方向调 `amount`（0~1），用来做同一段柱子的渐变亮端。
+ *
+ * 只接受 `#rrggbb`（`CATEGORICAL_COLORS` 就是这个写法）；别的写法原样返回，
+ * 免得为了兜底在渲染路径里塞一堆解析分支。
+ */
+export function lighten(color: string, amount: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!m) return color;
+  const n = parseInt(m[1]!, 16);
+  const mix = (c: number): number => Math.round(c + (255 - c) * amount);
+  const r = mix((n >> 16) & 255);
+  const g = mix((n >> 8) & 255);
+  const b = mix(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
+/** 渐变 `id` 的自增后缀：同一个页面上可能同时存在好几张图，`id` 不能撞 */
+let chartSeq = 0;
+
 /** 累计概率曲线（红线）的颜色。CSS 里也有一份，浮框的色块要与线一致 */
 const CUM_COLOR = '#e74c3c';
 
@@ -936,20 +975,54 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
 
   if (bars.length === 0) return f.svg;
 
-  // 左轴留 25% 余量给柱顶标签与曲线；曲线按 /1.1 缩放进同一个量纲
-  const axis = niceAxis(Math.max(...bars.map((b) => b.total)) * 1.25, 4);
+  // 纵轴贴着最高的柱子（只留 6% 放柱顶标注），不再抬到 40% 这种整齐的上限。
+  // 曲线按 /1.1 缩放进同一个量纲，所以上限变小与它无关。
+  const peak = Math.max(...bars.map((b) => b.total));
+  const axis = tightAxis(peak);
   yAxis(f, axis, (v) => pctTick(v, axis.step));
 
   const bandW = f.plotW / bars.length;
   const barW = Math.max(2, Math.min(bandW * 0.66, 84));
   const xOf = (i: number): number => (i + 0.5) * bandW;
   const yOf = (v: number): number => f.plotH - (v / axis.max) * f.plotH;
-  const yOfCum = (v: number): number => yOf((v / 1.1) * axis.max);
+  /**
+   * 累计概率的纵向映射：**右轴是一条真正的 0~100% 轴**，铺满整个绘图区高度。
+   *
+   * 参考实现把曲线缩进柱子的量纲时除了个 1.1（那时左轴留了 25% 余量）。
+   * 现在左轴贴着峰值，再除 1.1 会让 100% 落在最高那根柱子的顶**下面**十几像素 ——
+   * 曲线的起点钻进柱子里。改成不缩（`v * axis.max`）之后曲线恒在柱顶之上，
+   * 右轴的读数也不再受左轴上限的影响（上限怎么调，右轴都是 0~100% 铺满）。
+   */
+  const yOfCum = (v: number): number => yOf(v * axis.max);
 
   /** 堆叠顺序：条数少的在下面，同档按概率降序。颜色按这个顺序取 */
   const segsOf = bars.map((b) => [...b.segments].sort((x, y) => x.size - y.size || y.p - x.p));
   /** 段 → 颜色，浮框的色块要与图上画的那一段对上 */
   const colorOf = new Map<QualitySegment, string>();
+
+  /**
+   * 子柱子（段）用**渐变色**：每段一条竖向渐变，上端是该色的浅色调、下端是本色。
+   *
+   * 每段仍取自己的分类色（柱内要分得清，这是作者先前的要求），渐变只是给同一段
+   * 加上深浅层次，柱子不再是一摞纯色块。渐变按段的序号定义一次，所有柱子的第 k 段共用。
+   */
+  const segCount = Math.max(...segsOf.map((s) => s.length), 1);
+  const gradientId = `qseg${++chartSeq}`;
+  const defs = el('defs');
+  for (let k = 0; k < segCount; k++) {
+    const color = categoricalColor(k);
+    const grad = el('linearGradient', {
+      id: `${gradientId}-${k}`,
+      x1: '0',
+      y1: '0',
+      x2: '0',
+      y2: '1',
+    });
+    grad.append(el('stop', { offset: '0', 'stop-color': lighten(color, 0.45) }));
+    grad.append(el('stop', { offset: '1', 'stop-color': color }));
+    defs.append(grad);
+  }
+  f.svg.append(defs);
 
   // --- 标注放不放得下：先算，画的时候按这个来 ---
   //
@@ -1017,7 +1090,7 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
         y: y0,
         width: barW,
         height: Math.max(h, 0.6),
-        fill: color,
+        fill: `url(#${gradientId}-${k})`,
         // `quality-seg`：段之间留一道背景色细缝，浅色相邻时靠它分界
         class: 'bar-seg quality-seg',
       });
@@ -1116,21 +1189,38 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
     );
   });
 
-  // --- 勾选词条的合计：图的右上角 ---
+  // --- 勾选词条的合计：图的右上角，外加一个底框把它框住（作者要求「加个框高亮」） ---
+  //
+  // 摆在最上面一行（基线 26）：右轴的第一个累计刻度（100%）正好在绘图区上沿，
+  // 底框压下去会盖住它 —— 抬高 6px 两边就互不打扰。
   if (opts.pickNote) {
     const valueX = width - 12;
+    const valueW = textWidth(opts.pickNote.value, 12);
+    const labelW = textWidth(opts.pickNote.label, 11);
+    const left = valueX - valueW - 8 - labelW;
+    // 底框按两段文字的估算宽度给，四周各留 8 / 7 的余量
+    f.svg.append(
+      el('rect', {
+        x: left - 8,
+        y: 11,
+        width: valueX - left + 8,
+        height: 21,
+        rx: 6,
+        class: 'pick-box',
+      }),
+    );
     f.svg.append(
       text(opts.pickNote.value, {
-        x: valueX,
-        y: 32,
+        x: valueX - 4,
+        y: 26,
         'text-anchor': 'end',
         class: 'pick-value',
       }),
     );
     f.svg.append(
       text(opts.pickNote.label, {
-        x: valueX - textWidth(opts.pickNote.value, 12) - 8,
-        y: 32,
+        x: valueX - 4 - valueW - 8,
+        y: 26,
         'text-anchor': 'end',
         class: 'pick-label',
       }),
@@ -1170,9 +1260,10 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
           value: pct(s.p, 2),
           color: colorOf.get(s) ?? categoricalColor(0),
         }));
-      // 累计概率：曲线本身读不出具体数值，作者要求标在浮框里
+      // 累计概率：曲线本身读不出具体数值，作者要求标在浮框里。
+      // 它与上面那些行**不是同一类**（走右轴、来自另一条曲线），拉一道分隔线分开。
       if (showCum) {
-        rows.push({ label: '累计概率 ≥ 该分数', value: pct(b.atLeast, 2), color: CUM_COLOR });
+        rows.push({ label: '累计概率 ≥ 该分数', value: pct(b.atLeast, 2), color: CUM_COLOR, sep: true });
       }
       tooltip.show(
         {

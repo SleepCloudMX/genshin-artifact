@@ -84,6 +84,19 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
 const f = (x: number): string => x.toFixed(2);
 
 /**
+ * 一段带文字的 SVG 文本。
+ *
+ * `data-top` 标出「摘出来的那一块」（得分最高的组合）—— CSS 靠它把文字换成橙色，
+ * 让那一项在图上一眼看见。属性而不是类名，是为了让 `pie-label` / `pie-pct`
+ * 两套既有样式（字号 / 字体）原样保留。
+ */
+function pieText(content: string, attrs: Record<string, string>): SVGTextElement {
+  const t = svgEl('text', attrs);
+  t.textContent = content;
+  return t;
+}
+
+/**
  * 视觉角度（逆时针、y 轴朝上的习惯，与 matplotlib 一致）→ 屏幕坐标。
  *
  * SVG 的 y 朝下，所以这里做一次翻转；扇区一律按**角度增大 = 视觉逆时针**来铺，
@@ -232,15 +245,16 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
   for (const s of slices) {
     if (!s.pctInside) continue;
     const [x, y] = point(PCT_R * R + s.offset, s.midDeg);
-    const value = svgEl('text', {
-      x: f(x),
-      y: f(y + 1.1),
-      class: 'pie-pct',
-      'text-anchor': 'middle',
-      'data-slice': String(s.index),
-    });
-    value.textContent = pct(s.frac, 2);
-    svg.append(value);
+    svg.append(
+      pieText(pct(s.frac, 2), {
+        x: f(x),
+        y: f(y + 1.1),
+        class: 'pie-pct',
+        'text-anchor': 'middle',
+        'data-slice': String(s.index),
+        ...(s.offset > 0 ? { 'data-top': '1' } : {}),
+      }),
+    );
   }
 
   // --- 图外的名字：一行之内「名字 + 百分比」两列，百分比贴着引线（照参考图） ---
@@ -257,16 +271,19 @@ export function renderPie(opts: PieOptions): SVGSVGElement {
     const inward = s.side === 'right' ? 1.6 : -1.6;
     const anchor = s.side === 'right' ? 'start' : 'end';
     const baseline = s.y + 1.1;
+    /** 摘出来的那一块（得分最高）的文字用橙色高亮，与其他扇区分开（作者要求） */
+    const top = s.offset > 0 ? { 'data-top': '1' } : {};
     const put = (content: string, x: number, cls: string): void => {
-      const t = svgEl('text', {
-        x: f(x),
-        y: f(baseline),
-        class: cls,
-        'text-anchor': anchor,
-        'data-slice': String(s.index),
-      });
-      t.textContent = content;
-      svg.append(t);
+      svg.append(
+        pieText(content, {
+          x: f(x),
+          y: f(baseline),
+          class: cls,
+          'text-anchor': anchor,
+          'data-slice': String(s.index),
+          ...top,
+        }),
+      );
     };
     const value = pct(s.frac, 2);
     if (s.pctInside) {

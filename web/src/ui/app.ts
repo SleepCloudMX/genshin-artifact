@@ -661,7 +661,7 @@ export function mount(root: HTMLElement): void {
    *
    * 权重就是**分**，不乘成长值；默认口径是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2。
    * 候选集由 `selectableAttrs` 给出：主词条自己不能当副词条（`爆伤` / `暴伤` 也算同一条），
-   * 表里已有的词条在下拉里灰掉，免得配出两条一样的。
+   * 表里已经有的词条**不出现在下拉里**（列出来却点不了是反人类设计，作者要求删掉）。
    */
   function qualityWeightsField(): { box: HTMLElement; refresh(): void } {
     const box = node('div', { class: 'slots' });
@@ -770,10 +770,10 @@ export function mount(root: HTMLElement): void {
         const sel = node('select', { 'data-key': 'qattr' });
         sel.append(option('', C.NOT_SCORED, row.attr === ''));
         for (const a of allowed) {
-          const opt = option(a, a, a === row.attr);
-          // 已经被别的行占着的词条：列出来但不可选（同一张表里不能出现两条一样的）
-          if (a !== row.attr && used.includes(a)) opt.disabled = true;
-          sel.append(opt);
+          // 已经被别的行占着的词条**直接不列出来**（作者要求：留着但点不了是反人类设计）。
+          // 自己那一行占着的仍要列，否则下拉的当前值对不上 state。
+          if (a !== row.attr && used.includes(a)) continue;
+          sel.append(option(a, a, a === row.attr));
         }
         sel.value = row.attr;
 
@@ -1342,7 +1342,7 @@ export function mount(root: HTMLElement): void {
            */
           label: C.SUB_COMBOS,
           render(box) {
-            const p = panel('', C.COMBOS_HINT);
+            const p = panel('');
             const wrap = node('div', { class: 'pie-wrap' });
             const pieBox = node('div', { class: 'pie-box' });
             wrap.append(pieBox);
@@ -1399,7 +1399,6 @@ export function mount(root: HTMLElement): void {
 
             // 勾选框只写词条名：各词条的边缘概率在「词条概率」子 tab 里，
             // 这里要的是「同时含这几条」的合计（标在图上）。
-            tools.append(node('span', { class: 'tool-note' }, C.QUALITY_PICK_HINT));
             for (const a of dist?.attrProbs ?? []) {
               const lab = node('label', { class: 'check' });
               const input = node('input', { type: 'checkbox', 'data-attr': a.attr });

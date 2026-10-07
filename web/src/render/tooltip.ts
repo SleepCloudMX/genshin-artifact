@@ -13,6 +13,11 @@ export interface TooltipRow {
   value: string;
   /** 左侧色块颜色，省略则不画色块 */
   color?: string;
+  /**
+   * 这一行与上面几行**不是同一类**（如「质量分布」浮框里的累计概率：
+   * 它读的是曲线、走右轴），上面拉一道分隔线。
+   */
+  sep?: boolean;
 }
 
 /**
@@ -154,7 +159,7 @@ function build(content: TooltipContent): DocumentFragment {
     table.className = 'tt-rows';
     for (const row of content.rows) {
       const line = document.createElement('div');
-      line.className = 'tt-row';
+      line.className = row.sep ? 'tt-row tt-row-sep' : 'tt-row';
 
       if (row.color) {
         const dot = document.createElement('span');

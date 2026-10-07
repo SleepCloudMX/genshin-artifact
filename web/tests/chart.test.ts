@@ -21,6 +21,8 @@ import {
   textWidth,
   wrapCombo,
   niceAxis,
+  tightAxis,
+  lighten,
   tickIndices,
   nearestIndex,
 } from '../src/render/charts';
@@ -71,6 +73,27 @@ describe('坐标轴工具', () => {
       expect(Number.isFinite(a.max)).toBe(true);
       expect(a.step).toBeGreaterThan(0);
     }
+  });
+
+  it('tightAxis 的上限贴着峰值（作者：不要固定成 40% 那种），刻度仍是整齐步长', () => {
+    // 默认配置下最高那根柱子 31.97%：旧算法把它抬到 40%，柱子只占了 80% 的高度
+    const a = tightAxis(0.3197);
+    expect(a.max).toBeCloseTo(0.3197 * 1.06, 6);
+    expect(a.max).toBeLessThan(0.4);
+    expect(a.step).toBe(0.1);
+    // 步长仍是整齐值，且第一条网格线不会超过上限
+    expect(niceAxis(a.max).max % a.step).toBeCloseTo(0, 10);
+    // 峰值 / 上限 = 94%，柱子几乎顶到绘图区上沿
+    expect(0.3197 / a.max).toBeCloseTo(0.943, 3);
+    expect(Number.isFinite(tightAxis(0).max)).toBe(true);
+  });
+
+  it('lighten 把颜色调浅（段渐变的浅端），非 #rrggbb 原样返回', () => {
+    expect(lighten('#000000', 0.5)).toBe('#808080');
+    expect(lighten('#ffffff', 0.5)).toBe('#ffffff');
+    // 只动往白的方向，不会有变暗的分支
+    expect(lighten('#8cb8d7', 0.45)).not.toBe('#8cb8d7');
+    expect(lighten('red', 0.5)).toBe('red');
   });
 
   it('tickIndices 最多 maxLabels 个，且含首尾', () => {
@@ -491,21 +514,66 @@ describe('质量分布', () => {
     },
   ];
 
+  /** `url(#qseg3-2)` → 2（这一段的序位）；颜色在盘里就是按它取的 */
+  function gradientIndex(fill: string | null): number {
+    const m = /^url\(#qseg\d+-(\d)\)$/.exec(fill ?? '');
+    if (!m) throw new Error(`不是渐变填充：${fill}`);
+    return Number(m[1]);
+  }
+
+  /** 三个通道之和，只用来比较「谁更浅」 */
+  function brightness(hex: string): number {
+    return [1, 3, 5].reduce((s, i) => s + parseInt(hex.slice(i, i + 2), 16), 0);
+  }
+
   it('每根柱子按组合拆成多段，段色按堆叠顺序取（同一根柱子里的段必定不同色）', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
     const fills = [...svg.querySelectorAll('rect.bar-seg')].map((r) => r.getAttribute('fill'));
     expect(fills).toHaveLength(6);
-    // 每根柱子从第 0 号色开始：一根段、三段、一根段、一根段
-    expect(fills).toEqual([
-      categoricalColor(0),
-      categoricalColor(0),
-      categoricalColor(1),
-      categoricalColor(2),
-      categoricalColor(0),
-      categoricalColor(0),
-    ]);
-    // 跨柱子不复用同一套编码：同一个颜色在两根柱子里都出现了（作者说不需要区分）
+    // 每根柱子从第 0 号渐变开始：一根段、三段、一根段、一根段
+    expect(fills.map(gradientIndex)).toEqual([0, 0, 1, 2, 0, 0]);
+    // 跨柱子不复用同一套编码：同一段序位在两根柱子里都出现了（作者说不需要区分）
     expect(new Set(fills).size).toBeLessThan(fills.length);
+  });
+
+  it('段用渐变色：每段一条竖向渐变，上端浅、下端是该段的本色', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    const defs = svg.querySelectorAll('defs linearGradient');
+    // 段数最多的那根柱子有 3 段 → 只需要 3 条渐变
+    expect(defs).toHaveLength(3);
+    defs.forEach((g, k) => {
+      expect(g.getAttribute('id')).toMatch(new RegExp(`-${k}$`));
+      // 竖向：x1=x2、y1=0、y2=1
+      expect(g.getAttribute('x1')).toBe(g.getAttribute('x2'));
+      expect(g.getAttribute('y2')).toBe('1');
+      const stops = [...g.querySelectorAll('stop')].map((s) => s.getAttribute('stop-color')!);
+      expect(stops).toHaveLength(2);
+      // 下端就是分类色盘里那一个（浮框色块与图上对得上），上端是它的浅色调
+      expect(stops[1]).toBe(categoricalColor(k));
+      expect(brightness(stops[0]!)).toBeGreaterThan(brightness(stops[1]!));
+    });
+    // 图上每一段都指向一条渐变，而不是纯色
+    for (const r of svg.querySelectorAll('rect.bar-seg')) {
+      const id = /^url\(#(.+)\)$/.exec(r.getAttribute('fill')!)![1]!;
+      expect(svg.querySelector(`linearGradient[id="${id}"]`)).not.toBeNull();
+    }
+  });
+
+  it('纵轴贴着最高的柱子（不再固定到 40% 那种整齐上限）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    const height = Number(svg.getAttribute('viewBox')!.split(' ')[3]);
+    const plotH = height - 40 - 58;
+    // 最高那根（50%）的段高之和应当接近整个绘图区高度：上限 = 峰值 × 1.06
+    const tallest = [...svg.querySelectorAll('rect.bar-seg')]
+      .slice(1, 4)
+      .reduce((s, r) => s + Number(r.getAttribute('height')), 0);
+    expect(tallest / plotH).toBeGreaterThan(0.92);
+    expect(tallest / plotH).toBeLessThan(0.96);
+    // 左轴刻度只画到不超过上限的那些：0 / 20% / 40%（上限 53%）
+    const ticks = [...svg.querySelectorAll('text.axis-label')]
+      .filter((n) => Number(n.getAttribute('x')) < 0)
+      .map((n) => n.textContent);
+    expect(ticks).toEqual(['0%', '20%', '40%']);
   });
 
   it('同一根柱子里的段两两不同色（作者要求：柱内要有区分度）', () => {
@@ -530,7 +598,8 @@ describe('质量分布', () => {
     expect(svg.querySelector('path.cum-line')).not.toBeNull();
     expect(svg.querySelectorAll('rect.cum-dot')).toHaveLength(4);
     const labels = [...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['100.0%', '85.0%', '35.0%', '15.0%']);
+    // 20% 那根的刻度（35%）与它自己的柱顶标注只差 10px（< 11）→ 让路，见下一条用例
+    expect(labels).toEqual(['100.0%', '85.0%', '15.0%']);
     const title = svg.querySelector('text.cum-title')!;
     expect(title.textContent).toBe('累计概率');
     // 竖排（绕自己的位置转 90°），把右上角让给角标
@@ -564,17 +633,22 @@ describe('质量分布', () => {
   });
 
   it('柱顶标注与累计刻度快要叠在一起时，舍刻度保柱顶', () => {
-    // 3 分那根：柱顶 50%、累计 70% 缩进柱子量纲后正好落在柱顶上方 4px（< 11px）
+    // 最低分那档 50%：右轴是真正的 0~100% 轴，它的累计值 95% 落在柱顶（94.3%）上方 2px 处
     const tight: Bars = [
-      { score: 0, total: 0.3, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.3 }] },
-      { score: 3, total: 0.5, atLeast: 0.7, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.5 }] },
+      { score: 0, total: 0.5, atLeast: 0.95, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.5 }] },
+      { score: 3, total: 0.3, atLeast: 0.45, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.3 }] },
+      { score: 5, total: 0.2, atLeast: 0.2, segments: [{ label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.2 }] },
     ];
     const svg = renderQualityStacked({ bars: tight, tooltip: makeTooltip() });
     expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual([
-      '30.0%',
       '50.0%',
+      '30.0%',
+      '20.0%',
     ]);
-    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual(['100.0%']);
+    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual([
+      '45.0%',
+      '20.0%',
+    ]);
   });
 
   it('右轴刻度自己也不叠：末尾两根小柱子的累计值只差几个像素就舍掉后面那个', () => {
@@ -649,6 +723,8 @@ describe('质量分布', () => {
     expect(rows.some((t) => t!.includes('暴击 + 精通'))).toBe(true);
     // 累计概率在图上只是一条线，读不出数值 → 浮框里给出来（作者要求）
     expect(rows.some((t) => t!.includes('累计概率 ≥ 该分数') && t!.includes('85.00%'))).toBe(true);
+    // 它与上面几行不是一个类别（那条线读右轴）→ 单独一行并拉一道分隔线（作者要求）
+    expect(tt.querySelector('.tt-row.tt-row-sep')!.textContent).toContain('累计概率');
 
     // 作者点名：「本分数合计」与右上角的 badge 是同一个数，不许再出现
     expect(tt.textContent).not.toContain('本分数合计');
@@ -703,6 +779,19 @@ describe('质量分布', () => {
     expect(Number(value.getAttribute('x'))).toBeGreaterThan(500);
     expect(Number(value.getAttribute('y'))).toBeLessThan(40);
     expect(value.getAttribute('text-anchor')).toBe('end');
+    // 光一行文字在图上不够显眼：外面套一个框（作者要求「加个框高亮」）
+    const box = svg.querySelector('rect.pick-box')!;
+    expect(box).not.toBeNull();
+    const right = Number(box.getAttribute('x')) + Number(box.getAttribute('width'));
+    expect(right).toBeGreaterThan(Number(value.getAttribute('x')));
+    expect(Number(box.getAttribute('y'))).toBeLessThan(Number(value.getAttribute('y')));
+    // 右轴最上面那条累计刻度（100%）就在绘图区上沿，底框不能压到它
+    // （刻度是绘图区局部坐标，要加上上边距才是画布坐标）
+    const topCum =
+      Math.min(...[...svg.querySelectorAll('text.cum-label')].map((n) => Number(n.getAttribute('y')))) +
+      40;
+    const bottom = Number(box.getAttribute('y')) + Number(box.getAttribute('height'));
+    expect(bottom).toBeLessThan(topCum - 4);
   });
 
   it('不勾选就不画角标（没有「合计」可标）', () => {
@@ -803,6 +892,24 @@ describe('环形图', () => {
     const svg = renderPie({ items, title: 't', tooltip: makeTooltip() });
     const fills = [...svg.querySelectorAll('path.pie-slice')].map((p) => p.getAttribute('fill'));
     expect(fills).toEqual([categoricalColor(0), categoricalColor(1), categoricalColor(2)]);
+  });
+
+  it('摘出来的那一块文字用橙色（作者要求高亮最高的一项）', () => {
+    const svg = renderPie({
+      items: [...items.slice(0, 2), { label: '暴击 + 暴伤 + 精通', p: 0.02, explode: true }],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    // `data-top` 只挂在那一块的文字上（名字与百分比都算），其余不挂
+    const tops = [...svg.querySelectorAll('text[data-top]')];
+    expect(tops.length).toBeGreaterThan(0);
+    expect(tops.map((n) => n.getAttribute('data-slice'))).toEqual(
+      tops.map(() => '2'),
+    );
+    const explodedIdx = svg.querySelector('path.pie-slice[data-explode="1"]')!.getAttribute('data-slice');
+    expect(tops[0]!.getAttribute('data-slice')).toBe(explodedIdx);
+    // 颜色在 CSS 里（`--accent-warm`），这里只管标记挂对了位置
+    for (const n of tops) expect(n.classList.contains('pie-label') || n.classList.contains('pie-pct')).toBe(true);
   });
 
   it('起点固定在左上角：第一块从 140° 开始铺', () => {

@@ -212,9 +212,6 @@ export function topPercent(alpha: number): string {
 export const QUALITY_DIST_HINT =
   '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，颜色只区分同一根柱子里' +
   '的段；红线为累计概率（右轴）。';
-export const COMBOS_HINT =
-  '得分最高的那一项已摘出并固定在左上角；每个组合各占一片，长尾不并成「其他」。';
-export const QUALITY_PICK_HINT = '勾选 = 同时含这几条';
 /** 画不画累计概率曲线的勾选框 */
 export const CUM_SERIES = '累计概率';
 /** 图内右上角的标注：勾选了哪几条、这些胚子占多少 */
