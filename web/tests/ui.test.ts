@@ -505,12 +505,13 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelector('.tab-panel:not([hidden])')!.getAttribute('data-tab')).toBe('growth');
   });
 
-  it('侧边栏把当前任务的子任务列在它下面，点一下子任务就切过去', () => {
+  it('侧边栏默认**展开所有**任务的子任务（作者 2026-10-08），点一下子任务就切过去', () => {
     const root = freshRoot();
     mount(root);
     const subs = () => [...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent);
-    // 只展开当前任务（手风琴）
-    expect(subs()).toEqual(subLabels(root));
+    // 默认全展开：三个任务的子任务都列着（不是只有当前任务）
+    expect(subs()).toEqual(['概率分布', '达到概率', '命中次数', '分位分数线', '成长值',
+      '组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
     // 点侧边栏里的「达到概率」→ 图表上方那一排也跟着选中
     const target = [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-sub')].find(
       (b) => b.textContent === C.SUB_SURVIVAL,
@@ -519,10 +520,37 @@ describe('主 tab 与子 tab', () => {
     expect(visibleSubPanel(root).querySelector('#survChart svg')).not.toBeNull();
     const on = root.querySelector('.sidebar .tree-sub.on')!;
     expect(on.textContent).toBe(C.SUB_SURVIVAL);
-    // 换任务后，列出来的是新任务的子任务
+    // 换任务之后**照样是全展开的**，只是高亮跟着走
     clickTab(root, 'quality');
-    expect(subs()).toEqual(subLabels(root));
-    expect(subs()[0]).toBe(C.SUB_COMBOS);
+    expect(subs()).toEqual(['概率分布', '达到概率', '命中次数', '分位分数线', '成长值',
+      '组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
+    // 每个任务各自记着自己的子 tab：得分分布停在「达到概率」，另两个还在各自的第一个
+    expect([...root.querySelectorAll('.sidebar .tree-sub.on')].map((b) => b.textContent))
+      .toEqual([C.SUB_SURVIVAL, C.SUB_COMBOS, C.SUB_BASIC_WEIGHTS]);
+  });
+
+  it('每个任务都能单独收起 / 展开（收起状态跨任务切换保留）', () => {
+    const root = freshRoot();
+    mount(root);
+    const carets = () => [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-caret')];
+    const subs = () => [...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent);
+    expect(carets()).toHaveLength(3);
+
+    // 收起第一个任务（得分分布）：只剩它的名字，另外两个任务的子项还在
+    carets()[0]!.click();
+    expect(subs()).toEqual(['组合概率', '质量分布', '词条概率', '词条权重', '主词条 × 副词条']);
+    expect(carets()[0]!.getAttribute('aria-expanded')).toBe('false');
+    expect(carets()[0]!.textContent).toBe('▸');
+
+    // 切到别的任务再切回来：收起状态还在
+    clickTab(root, 'quality');
+    clickTab(root, 'growth');
+    expect(subs()).toHaveLength(5);
+
+    // 再点一次展开，全部回来
+    carets()[0]!.click();
+    expect(subs()).toHaveLength(10);
+    expect(carets()[0]!.textContent).toBe('▾');
   });
 
   it('配置栏在图表**右侧**，且跟着任务走；不需要配置的任务只把这一栏藏起来', () => {
@@ -747,8 +775,9 @@ describe('主 tab 与子 tab', () => {
     const second = visibleSubPanel(root);
     expect(second.querySelector('#substatHeatmap svg')).not.toBeNull();
     expect(second.querySelector('#weightChart')).toBeNull();
-    // 侧边栏把这两个子任务列在「基础概率」下面（与图表上方那一排同一份状态）
-    expect([...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent)).toEqual([
+    // 侧边栏把这两个子任务列在「基础概率」下面（与图表上方那一排同一份状态；
+    // 现在目录默认全展开，所以这里是「基础概率那一组」里的两项，取末尾两项看）
+    expect([...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent).slice(-2)).toEqual([
       C.SUB_BASIC_WEIGHTS,
       C.SUB_BASIC_SUB,
     ]);

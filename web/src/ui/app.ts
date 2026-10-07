@@ -1886,16 +1886,20 @@ export function mount(root: HTMLElement): void {
   const staleTabs = new Set<string>();
 
   /**
-   * 侧边栏的任务树：主任务 + **当前任务**的子任务。
+   * 侧边栏的任务树：主任务 + **每个任务**的子任务（默认全展开）。
    *
-   * 子任务只在它是当前任务时才列出来（手风琴）：一屏里同时铺开四个任务的二十个子项
-   * 反而找不到自己在哪。窄屏时子任务整段隐藏，由图表上方那一排负责切换
-   * （见 `styles.css` 的 1180px 断点）。
+   * 作者 2026-10-08：「目录需要默认展开所有，并可选择收起。」
+   * —— 逐个任务都能收起（点主任务右边那个小三角），收起状态记在这个集合里，
+   * **不进 URL**（与勾选、看图状态一个规矩）；窄屏时子任务整段隐藏，
+   * 由图表上方那一排负责切换（见 `styles.css` 的 1180px 断点）。
    */
+  const collapsed = new Set<string>();
+
   function renderTree(): void {
     tree.replaceChildren();
     for (const tab of TABS) {
       const group = node('div', { class: 'tree-group' });
+      const row = node('div', { class: 'tree-row' });
       const btn = node('button', {
         type: 'button',
         class: tab.id === activeTab ? 'tab on' : 'tab',
@@ -1906,10 +1910,29 @@ export function mount(root: HTMLElement): void {
       });
       btn.textContent = tab.label;
       btn.addEventListener('click', () => selectTab(tab.id, true));
-      group.append(btn);
+      row.append(btn);
 
       const api = subsOf.get(tab.id);
-      if (api && tab.id === activeTab) {
+      const open = !collapsed.has(tab.id);
+      if (api) {
+        const caret = node('button', {
+          type: 'button',
+          class: 'tree-caret',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-label': `${open ? '收起' : '展开'}${tab.label}`,
+          title: open ? '收起' : '展开',
+        });
+        caret.textContent = open ? '▾' : '▸';
+        caret.addEventListener('click', () => {
+          if (open) collapsed.add(tab.id);
+          else collapsed.delete(tab.id);
+          renderTree();
+        });
+        row.append(caret);
+      }
+      group.append(row);
+
+      if (api && open) {
         const list = node('div', { class: 'tree-subs' });
         api.labels.forEach((label, i) => {
           const sub = node('button', {

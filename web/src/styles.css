@@ -396,6 +396,27 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 .sidebar { min-width: 0; }
 .tree { display: flex; flex-direction: column; gap: 2px; }
 .tree-group { display: flex; flex-direction: column; gap: 2px; }
+/* 主任务那一行：名字 + 右边的收起三角 */
+.tree-row { display: flex; align-items: center; gap: 2px; }
+.tree-row .tab { flex: 1 1 auto; min-width: 0; }
+/* 收起 / 展开的三角（作者 2026-10-08：「目录需要默认展开所有，并可选择收起」）。
+   与「点名字 = 切到这个任务」分开成两个热区，免得点名字时误收起。 */
+.tree-caret {
+  appearance: none;
+  flex: none;
+  width: 20px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.tree-caret:hover { background: var(--bg-soft); color: var(--text); }
 .tab {
   appearance: none;
   background: none;
@@ -442,6 +463,8 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 @media (max-width: 1180px) {
   .sidebar .tree { flex-direction: row; flex-wrap: wrap; }
   .sidebar .tree-subs { display: none; }
+  /* 子任务整段藏了，三角留着也没用 */
+  .sidebar .tree-caret { display: none; }
 }
 
 /* 中间那一栏顶上的标题：写着当前任务的**名字**（「得分分布」/「胚子质量」/「基础概率」）。
