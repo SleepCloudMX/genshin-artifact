@@ -1680,11 +1680,11 @@ export function mount(root: HTMLElement): void {
               chart.replaceChildren(
                 renderHistogram({
                   items: data.map((d) => ({ label: d.attr, value: d.p })),
-                  // 第二行小字就是权重本身 —— 「列一下所有副词条的权重」要的就是它，
-                  // 而且它不随点击变（变的是归一化之后的概率）
-                  subLabels: data.map((d) => String(d.weight)),
+                  // 权重写在柱子**里面**（作者 2026-10-07：「改为在柱子内显示权重」）——
+                  // 它不随点击变（变的是归一化之后的概率）
+                  insideLabels: data.map((d) => String(d.weight)),
                   dimmed: data.findIndex((d) => d.excluded),
-                  dimmedLabel: C.EXCLUDED_TAG,
+                  dimmedLabel: C.MAIN_STAT_TAG,
                   title: C.weightsChartTitle(excluded),
                   upper: WEIGHT_AXIS,
                   plain: true,

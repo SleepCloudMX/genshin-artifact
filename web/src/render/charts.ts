@@ -38,6 +38,15 @@ export function hitColor(h: number): string {
 export const SERIES_COLOR = '#2563eb';
 export const CDF_COLOR = SERIES_COLOR;
 
+/**
+ * 柱顶数值（`.bar-label`）的字号。
+ *
+ * 写在这里是因为**两处判据要用它**：「标不标得下」按 `textWidth(标签, 这个字号)` 量，
+ * 而 CSS 里 `.bar-label` 的 font-size 必须与它一致 —— 改一处就要改另一处。
+ * 作者 2026-10-07：「横轴标注的属性太浅/太小，改明显一点；标注的概率同理。」
+ */
+export const BAR_LABEL_SIZE = 11;
+
 function el<K extends keyof SVGElementTagNameMap>(
   tag: K,
   attrs: Record<string, string | number> = {},
@@ -376,22 +385,23 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
     });
   });
 
-  // --- 柱上标注：只在柱子够宽、且不密集时画 ---
-  const showLabels = bandW >= 26;
-  if (showLabels) {
-    data.forEach((d, i) => {
-      const total = totals[i]!;
-      if (total < axis.max * 0.08) return;
-      f.plot.append(
-        text(pct(total, 1), {
-          x: xOf(i),
-          y: yOf(total) - 5,
-          'text-anchor': 'middle',
-          class: 'bar-label',
-        }),
-      );
-    });
-  }
+  // --- 柱上标注：柱子宽到写得下这个数、且这根柱子不算太小的时候才画 ---
+  //     宽度判据用**这一根自己的标签**去量（`.bar-label` 是 11px 等宽字体，
+  //     作者 2026-10-07 嫌 9.5px 太浅太小，字号一改这里也得跟着改）
+  data.forEach((d, i) => {
+    const total = totals[i]!;
+    if (total < axis.max * 0.08) return;
+    const label = pct(total, 1);
+    if (textWidth(label, BAR_LABEL_SIZE) > bandW) return;
+    f.plot.append(
+      text(label, {
+        x: xOf(i),
+        y: yOf(total) - 6,
+        'text-anchor': 'middle',
+        class: 'bar-label',
+      }),
+    );
+  });
 
   xAxis(
     f,
@@ -697,14 +707,15 @@ export interface HistogramOptions {
    */
   plain?: boolean;
   /**
-   * 横轴标号下面的第二行小字（如权重）。给了就多画一行 —— 于是柱子少一点高度、
-   * 轴标题那一行不再需要。
+   * 画在柱子**里面**的注解（如权重）：贴底居中，颜色交给 CSS
+   * （柱身是强调色时写白字、被当成主词条那一根压暗后写深字）。
+   * 柱子矮到写不下就整根不画 —— 字挤出柱子外比不标更难读。
    */
-  subLabels?: readonly string[];
+  insideLabels?: readonly string[];
   /**
    * 被挑掉的那一根（下标）：压暗（`.bar-off`）**并且把柱顶数值换成 `dimmedLabel`**。
-   * 用于「这一条已经不在池子里了」——柱高留在原处，让人看得出挑掉的是哪一条。
-   * 传负数 / 不传 = 没有这一根。
+   * 用于「这一条已经不在池子里了」（权重图里它被当成了主词条）——柱高留在原处，
+   * 让人看得出挑掉的是哪一条。传负数 / 不传 = 没有这一根。
    */
   dimmed?: number;
   /** 上面那根柱子顶上写什么（文案由调用方给，渲染层不写中文） */
@@ -731,7 +742,7 @@ export interface HistogramOptions {
 export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   const { items, title, tooltip } = opts;
   const format = opts.format ?? ((v: number) => pct(v, 2));
-  const subs = opts.subLabels;
+  const inside = opts.insideLabels;
   const fit = fitSize(opts.host, { ratio: 0.30, minH: 260, maxH: 420 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
@@ -782,15 +793,17 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   });
 
   xAxis(f, items.map((d, i) => ({ x: xOf(i), text: d.label })), '');
-  // 第二行小字（权重）：贴着标号下面一行，字号更小、颜色更淡
-  if (subs) {
-    subs.forEach((s, i) => {
+  // 柱子**里面**的注解（权重）：贴底居中
+  if (inside) {
+    items.forEach((d, i) => {
+      if (f.plotH - yOf(d.value) < 22) return;
+      const off = i === opts.dimmed;
       f.plot.append(
-        text(s, {
+        text(inside[i] ?? '', {
           x: xOf(i),
-          y: f.plotH + 28,
+          y: f.plotH - 7,
           'text-anchor': 'middle',
-          class: 'axis-sub',
+          class: off ? 'bar-inside-off' : 'bar-inside',
         }),
       );
     });
@@ -1121,7 +1134,7 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
   // 相邻的标号会压在一起（那不是「柱子小」，是「柱子密」）。
   /** 柱顶标注与累计刻度挨得比这个还近时，让刻度让路 */
   const MIN_GAP = 11;
-  const barLabel = bars.map((b) => textWidth(pct(b.total, 1)) <= bandW);
+  const barLabel = bars.map((b) => textWidth(pct(b.total, 1), BAR_LABEL_SIZE) <= bandW);
   /**
    * 累计刻度画不画。
    *

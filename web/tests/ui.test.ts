@@ -804,20 +804,20 @@ describe('主 tab 与子 tab', () => {
     };
 
     expect(chart().querySelectorAll('rect.bar-seg')).toHaveLength(10);
-    // 第二行小字 = 权重（与部位无关的那张固定表）
-    expect([...chart().querySelectorAll('text.axis-sub')].map((t) => t.textContent)).toEqual([
+    // 权重写在柱子**里面**（与部位无关的那张固定表）
+    expect([...chart().querySelectorAll('text.bar-inside')].map((t) => t.textContent)).toEqual([
       '150', '150', '150', '100', '100', '100', '75', '75', '100', '100',
     ]);
-    // 不排除任何词条时，数字 = 权重占比
+    // 不指定主词条时，柱顶数字 = 权重占比
     expect(labels()).toEqual([
       '13.64%', '13.64%', '13.64%', '9.09%', '9.09%', '9.09%', '6.82%', '6.82%', '9.09%', '9.09%',
     ]);
     expect(chart().querySelector('text.chart-title')!.textContent).toBe(C.weightsChartTitle(null));
 
-    // 点「小生命」那一根 → 它被排除，其余按 950 归一
+    // 点「小生命」那一根 → 以它为主词条，其余按 950 归一
     pick(0);
     expect(labels()).toEqual([
-      C.EXCLUDED_TAG, '15.79%', '15.79%', '10.53%', '10.53%', '10.53%', '7.89%', '7.89%', '10.53%',
+      C.MAIN_STAT_TAG, '15.79%', '15.79%', '10.53%', '10.53%', '10.53%', '7.89%', '7.89%', '10.53%',
       '10.53%',
     ]);
     expect(chart().querySelector('text.chart-title')!.textContent).toBe(
@@ -831,10 +831,10 @@ describe('主 tab 与子 tab', () => {
     expect(labels()[1]).toBe('13.64%');
     expect(chart().querySelectorAll('rect.bar-off')).toHaveLength(0);
 
-    // 点另一根：换成排除它（同时只有一条被排除）
+    // 点另一根：改成以它为主词条（同时只有一根被标成主词条）
     pick(6);
     expect(chart().querySelectorAll('rect.bar-off')).toHaveLength(1);
-    expect(labels()[6]).toBe(C.EXCLUDED_TAG);
+    expect(labels()[6]).toBe(C.MAIN_STAT_TAG);
     expect(labels()[0]).toBe('14.63%'); // 150 / 1025
   });
 

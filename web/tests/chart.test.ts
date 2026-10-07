@@ -491,25 +491,34 @@ describe('分类柱状图', () => {
     expect(bar.classList.contains('bar-plain')).toBe(true);
   });
 
-  it('横轴标号下的第二行小字（权重）画在同一列上', () => {
+  it('柱子**里面**的注解（权重）贴底居中，柱子太矮就不画', () => {
     const svg = renderHistogram({
       items: [
         { label: '小生命', value: 0.1364 },
         { label: '暴击', value: 0.0682 },
       ],
-      subLabels: ['150', '75'],
+      insideLabels: ['150', '75'],
       title: 't',
       tooltip: makeTooltip(),
     });
-    const subs = [...svg.querySelectorAll('text.axis-sub')];
+    const subs = [...svg.querySelectorAll('text.bar-inside')];
     expect(subs.map((t) => t.textContent)).toEqual(['150', '75']);
-    // 与上面那行的标号 x 对齐（横轴标号是居中的那些，纵轴刻度是右对齐的）
+    // 与柱子同列（x 对齐），且**在柱子里面**（贴着绘图区底部，不是横轴标号那一行）
     const xLabels = [...svg.querySelectorAll('text.axis-label')].filter(
       (t) => t.getAttribute('text-anchor') === 'middle',
     );
     expect(xLabels.map((t) => t.textContent)).toEqual(['小生命', '暴击']);
     expect(subs[0]!.getAttribute('x')).toBe(xLabels[0]!.getAttribute('x'));
-    expect(Number(subs[0]!.getAttribute('y'))).toBeGreaterThan(Number(xLabels[0]!.getAttribute('y')));
+    expect(Number(subs[0]!.getAttribute('y'))).toBeLessThan(Number(xLabels[0]!.getAttribute('y')));
+    // 矮到写不下的柱子不标（22px 以下）
+    const tiny = renderHistogram({
+      items: [{ label: 'a', value: 0.001 }],
+      insideLabels: ['150'],
+      upper: 0.2,
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    expect(tiny.querySelectorAll('text.bar-inside')).toHaveLength(0);
   });
 
   it('被挑掉的那一根：压暗 + 柱顶换成调用方给的文案（数字让位）', () => {
