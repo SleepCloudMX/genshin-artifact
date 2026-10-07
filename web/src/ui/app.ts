@@ -53,6 +53,7 @@ import {
 } from '../core/growth';
 import {
   qualityDistribution,
+  qualityProbContaining,
   pieSlices,
   sameCombo,
   comboLabel,
@@ -1143,8 +1144,10 @@ export function mount(root: HTMLElement): void {
       const panels = node('div', { class: 'subtab-panels' });
       const bar = node('div', { class: 'subtabs', role: 'tablist' });
       let dist: QualityDistribution | null = null;
-      /** 「质量分布（详细）」里勾选高亮的词条；纯看图状态，不进 URL */
+      /** 「质量分布」里勾选高亮的词条；纯看图状态，不进 URL */
       const picked = new Set<SubAttr>();
+      /** 是否画累计概率曲线；纯看图状态，不进 URL */
+      let showCum = true;
 
       const subs: SubTab[] = [
         {
@@ -1201,8 +1204,9 @@ export function mount(root: HTMLElement): void {
            * 再叠一条累计概率曲线。参考 `docs/ai-ref/v1/init_stats/暴伤/质量分布-详细-1.png`。
            *
            * 上面那排勾选框对应「有效词条」：勾上就把它所在的**子柱子**（组合段）
-           * 挑出来、其余压暗 —— 参考图的 `highlight_comb` 就是这个用法。
-           * 勾选状态是**看图用的，不进 URL**（换个链接不该带着别人的高亮）。
+           * 挑出来、其余压暗 —— 参考图的 `highlight_comb` 就是这个用法；
+           * 同时含这几条词条的胚子占多少，标在图内右上角（作者要求）。
+           * 勾选状态与「累计概率」开关都是**看图用的，不进 URL**（换个链接不该带着别人的视图）。
            */
           label: C.SUB_QUALITY_DIST,
           render(box) {
@@ -1210,6 +1214,21 @@ export function mount(root: HTMLElement): void {
             p.box.classList.add('flush');
 
             const tools = node('div', { class: 'chart-tools checks' });
+
+            // 累计概率：勾掉就整条曲线（含右轴与虚线）都不画
+            const cumLab = node('label', { class: 'check' });
+            const cumInput = node('input', { type: 'checkbox', id: 'showCum' });
+            cumInput.checked = showCum;
+            cumInput.addEventListener('change', () => {
+              showCum = cumInput.checked;
+              paint();
+            });
+            cumLab.append(cumInput, node('span', {}, C.CUM_SERIES));
+            tools.append(cumLab, node('span', { class: 'tool-sep' }));
+
+            // 勾选框只写词条名：各词条的边缘概率在「词条概率」子 tab 里，
+            // 这里要的是「同时含这几条」的合计（标在图上）。
+            tools.append(node('span', { class: 'tool-note' }, C.QUALITY_PICK_HINT));
             for (const a of dist?.attrProbs ?? []) {
               const lab = node('label', { class: 'check' });
               const input = node('input', { type: 'checkbox', 'data-attr': a.attr });
@@ -1219,7 +1238,7 @@ export function mount(root: HTMLElement): void {
                 else picked.delete(a.attr);
                 paint();
               });
-              lab.append(input, node('span', {}, `${a.attr} ${pct(a.p)}`));
+              lab.append(input, node('span', {}, a.attr));
               tools.append(lab);
             }
 
@@ -1230,10 +1249,21 @@ export function mount(root: HTMLElement): void {
 
             const bars = qualityBarsOf(dist);
             function paint(): void {
+              const d = dist!;
+              const attrs = d.attrs.filter((a) => picked.has(a));
               chart.replaceChildren(
                 renderQualityStacked({
                   bars,
-                  highlight: [...picked],
+                  highlight: attrs,
+                  showCum,
+                  ...(attrs.length > 0
+                    ? {
+                        pickNote: {
+                          label: C.pickedLabel(attrs),
+                          value: pct(qualityProbContaining(d, attrs)),
+                        },
+                      }
+                    : {}),
                   host: chart,
                   tooltip: tabCtx.tooltip,
                 }),
@@ -1279,6 +1309,9 @@ export function mount(root: HTMLElement): void {
         }
 
         note.textContent = C.qualityNote(state.mainAttr, dist.droppedAttr, dist.attrs.length);
+        // 权重表换过之后，勾选框里可能留着已经不计分的词条：剔掉。
+        // 留着的话「高亮含这条的段」一段都命中不了，整张图会被压暗。
+        for (const a of [...picked]) if (!dist.attrs.includes(a)) picked.delete(a);
         cards.replaceChildren(
           card(C.CARD_ATTRS, `${dist.attrs.length} 条`, dist.attrs.join(' / ') || '—'),
           card(C.CARD_MEAN, fmtScore(dist.mean), C.CARD_MEAN_NOTE),

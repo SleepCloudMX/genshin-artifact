@@ -198,6 +198,26 @@ export function qualityProbAtLeast(d: QualityDistribution, targetScore: number):
   return acc;
 }
 
+/**
+ * 「胚子**同时含**这几条词条」的概率。
+ *
+ * 这是堆叠图上勾选高亮时那个概率之和：勾选框挑出的是「组合包含全部勾选词条」的段
+ * （与参考实现的 `issubset` 同义），把这些段的概率加起来就是它。
+ * 组合互斥且穷尽，所以这个和就是概率本身，不是「各词条概率相加」——
+ * 后者会把同一条词条重复计入（Σ 边缘概率可以超过 1）。
+ *
+ * 空数组返回 1（「什么都不要求」是必然事件），这样调用方不用特判。
+ */
+export function qualityProbContaining(
+  d: QualityDistribution,
+  attrs: readonly SubAttr[],
+): number {
+  if (attrs.length === 0) return 1;
+  let acc = 0;
+  for (const c of d.combos) if (attrs.every((a) => c.combo.includes(a))) acc += c.p;
+  return acc;
+}
+
 /** 大约要刷多少个胚子才能出一个「≥ targetScore 的」 */
 export function qualityExpectedAttempts(
   d: QualityDistribution,

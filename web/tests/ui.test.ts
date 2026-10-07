@@ -707,6 +707,56 @@ describe('主 tab 与子 tab', () => {
     expect(pair.querySelector('#slot')).not.toBeNull();
     expect(pair.querySelector('#mainAttr')).not.toBeNull();
   });
+
+  it('质量分布：勾选框只写词条名，右上角标出「同时含这几条」的概率', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    clickSub(root, C.SUB_QUALITY_DIST);
+    const panel = visibleSubPanel(root);
+    const checks = [...panel.querySelectorAll<HTMLLabelElement>('.check')];
+    // 第一个是「累计概率」开关，后面才是词条
+    expect(checks[0]!.querySelector('input')!.id).toBe('showCum');
+    const attrs = checks.slice(1).map((c) => c.textContent ?? '');
+    expect(attrs).toEqual(['大攻击', '暴击', '暴伤', '精通']);
+    // 词条名后面不再跟该词条的概率（作者要求：那是「词条概率」子 tab 的事）
+    for (const t of attrs) expect(t).not.toContain('%');
+
+    // 一个都没勾 → 不标
+    expect(panel.querySelector('text.pick-value')).toBeNull();
+
+    // 勾一个：P(含暴击)；再勾一个：P(同时含暴击与暴伤)
+    const box = (attr: string): HTMLInputElement =>
+      panel.querySelector<HTMLInputElement>(`.check input[data-attr="${attr}"]`)!;
+    box('暴击').checked = true;
+    fire(box('暴击'), 'change');
+    expect(visibleSubPanel(root).querySelector('text.pick-value')!.textContent).toBe('29.42%');
+    expect(visibleSubPanel(root).querySelector('text.pick-label')!.textContent).toBe('含 暴击');
+
+    box('暴伤').checked = true;
+    fire(box('暴伤'), 'change');
+    const sub = visibleSubPanel(root);
+    expect(sub.querySelector('text.pick-value')!.textContent).toBe('6.69%');
+    expect(sub.querySelector('text.pick-label')!.textContent).toBe('含 暴击 + 暴伤');
+  });
+
+  it('质量分布：累计概率可以取消，取消后曲线与右轴刻度都消失', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    clickSub(root, C.SUB_QUALITY_DIST);
+    const cum = visibleSubPanel(root).querySelector<HTMLInputElement>('#showCum')!;
+    expect(cum.checked).toBe(true);
+    expect(visibleSubPanel(root).querySelector('path.cum-line')).not.toBeNull();
+
+    cum.checked = false;
+    fire(cum, 'change');
+    const chart = visibleSubPanel(root).querySelector('#qualityDist')!;
+    expect(chart.querySelector('path.cum-line')).toBeNull();
+    expect(chart.querySelectorAll('text.cum-label')).toHaveLength(0);
+    // 柱子还在
+    expect(chart.querySelectorAll('rect.bar-seg').length).toBeGreaterThan(0);
+  });
 });
 
 describe('分桶（柱数太多时合并相邻分数）', () => {

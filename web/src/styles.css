@@ -470,23 +470,28 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .pie-label { fill: var(--text); font-size: 3.2px; }
 .pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }
 
-/* 质量分布（详细）：柱内标注 + 累计概率曲线 + 勾选高亮 */
+/* 质量分布：柱内标注 + 累计概率曲线 + 勾选高亮 */
 .seg-label { fill: #fff; font-size: 9.5px; font-weight: 600; }
 .seg-pct { fill: rgb(255 255 255 / 82%); font-size: 9px; font-family: var(--mono); }
 /* 勾选的词条：命中的段留着原色并描一圈橙色（参考图的高亮色），其余压暗。
-   压暗比「把命中段换个颜色」更能看出「哪些段属于它」，也不会毁掉
-   「段色 = 几条有效词条」这套编码。描边用橙色，是因为它在 5 个段色上都看得见
-   （用主题蓝会在蓝色的「1 条」段上消失）。 */
+   压暗比「把命中段换个颜色」更能看出「哪些段属于它」，也不会毁掉段色这套编码。
+   描边用橙色，是因为它在 10 个段色上都看得见，而且段色盘里刻意没有橙色系。 */
 .bar-seg.seg-dim, .seg-label.seg-dim, .seg-pct.seg-dim { opacity: .2; }
 .bar-seg.seg-hit { stroke: #ff8c00; stroke-width: 2; }
 .cum-line { fill: none; stroke: #e74c3c; stroke-width: 2; }
 .cum-dot { fill: #e74c3c; }
 .cum-guide { stroke: #e74c3c; stroke-width: .6; stroke-dasharray: 3 4; opacity: .3; }
 .cum-label { fill: #e74c3c; font-size: 10px; font-family: var(--mono); }
+/* 右轴名竖排（画在图的右边缘中段），把右上角让给「含勾选词条的比例」角标 */
 .cum-title { fill: #e74c3c; font-size: 11px; }
+/* 图内右上角的角标：勾选了哪几条 + 同时含这几条的概率 */
+.pick-label { fill: var(--text-dim); font-size: 11px; }
+.pick-value { fill: var(--text); font-size: 12px; font-weight: 650; font-family: var(--mono); }
 
-/* 图内工具条上的勾选框（「质量分布（详细）」用） */
+/* 图内工具条上的勾选框（「质量分布」用） */
 .chart-tools.checks { gap: 4px 14px; }
+.tool-sep { width: 1px; height: 14px; background: var(--border-strong); }
+.tool-note { font-size: 12.5px; color: var(--text-faint); }
 .check {
   display: inline-flex;
   align-items: center;

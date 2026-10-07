@@ -16,6 +16,9 @@ import {
   type SurvivalChartOptions,
   renderHistogram,
   hitColor,
+  segmentColor,
+  textWidth,
+  wrapCombo,
   niceAxis,
   tickIndices,
   nearestIndex,
@@ -441,21 +444,25 @@ describe('分类柱状图', () => {
   });
 });
 
-describe('质量分布（详细）', () => {
+describe('质量分布', () => {
   type Bars = Parameters<typeof renderQualityStacked>[0]['bars'];
+  /**
+   * 四根柱子，数字自洽（合计 100%）：15% 一根独苗、50% 分三段、20% 一整段（4 条词条，
+   * 名字在柱宽里一行写不下）、15% 一根独苗。
+   */
   const bars: Bars = [
     {
       score: 0,
-      total: 0.3,
+      total: 0.15,
       atLeast: 1,
       segments: [
-        { label: '无有效词条', attrs: [], size: 0, p: 0.3 },
+        { label: '无有效词条', attrs: [], size: 0, p: 0.15 },
       ],
     },
     {
       score: 3,
       total: 0.5,
-      atLeast: 0.7,
+      atLeast: 0.85,
       segments: [
         { label: '暴击', attrs: ['暴击'], size: 1, p: 0.3 },
         { label: '暴击 + 精通', attrs: ['暴击', '精通'], size: 2, p: 0.15 },
@@ -465,7 +472,7 @@ describe('质量分布（详细）', () => {
     {
       score: 7,
       total: 0.2,
-      atLeast: 0.2,
+      atLeast: 0.35,
       segments: [
         {
           label: '暴击 + 精通 + 大攻击 + 暴伤',
@@ -475,16 +482,36 @@ describe('质量分布（详细）', () => {
         },
       ],
     },
+    {
+      score: 10,
+      total: 0.15,
+      atLeast: 0.15,
+      segments: [{ label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.15 }],
+    },
   ];
 
-  it('每根柱子按组合拆成多段，段色按「几条有效词条」取', () => {
+  it('每根柱子按组合拆成多段，段色按堆叠顺序取（同一根柱子里的段必定不同色）', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
-    expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(5);
-    // 0 条 / 1 条 / 2 条 / 3 条 / 4 条各一段，颜色必须与 hitColor(条数) 一致
     const fills = [...svg.querySelectorAll('rect.bar-seg')].map((r) => r.getAttribute('fill'));
-    expect(new Set(fills)).toEqual(
-      new Set([0, 1, 2, 3, 4].map((n) => hitColor(n))),
-    );
+    expect(fills).toHaveLength(6);
+    // 每根柱子从第 0 号色开始：一根段、三段、一根段、一根段
+    expect(fills).toEqual([
+      segmentColor(0),
+      segmentColor(0),
+      segmentColor(1),
+      segmentColor(2),
+      segmentColor(0),
+      segmentColor(0),
+    ]);
+    // 跨柱子不复用同一套编码：同一个颜色在两根柱子里都出现了（作者说不需要区分）
+    expect(new Set(fills).size).toBeLessThan(fills.length);
+  });
+
+  it('同一根柱子里的段两两不同色（作者要求：柱内要有区分度）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    // 第 2 根柱子（3 段）的颜色互不相同 —— 旧版按「几条有效词条」取色时它们全是同一个蓝
+    const three = [...svg.querySelectorAll('rect.bar-seg')].slice(1, 4).map((r) => r.getAttribute('fill'));
+    expect(new Set(three).size).toBe(3);
   });
 
   it('堆叠顺序按条数从少到多（条数少的在下面）', () => {
@@ -497,30 +524,114 @@ describe('质量分布（详细）', () => {
     expect(three[1]!).toBeGreaterThan(three[2]!);
   });
 
-  it('画出累计概率曲线与节点，右侧标出真实概率', () => {
+  it('画出累计概率曲线与节点，右侧标出真实概率，轴名竖排', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
     expect(svg.querySelector('path.cum-line')).not.toBeNull();
-    expect(svg.querySelectorAll('rect.cum-dot')).toHaveLength(3);
+    expect(svg.querySelectorAll('rect.cum-dot')).toHaveLength(4);
     const labels = [...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['100.0%', '70.0%', '20.0%']);
-    expect(svg.querySelector('text.cum-title')!.textContent).toBe('累计概率');
+    expect(labels).toEqual(['100.0%', '85.0%', '35.0%', '15.0%']);
+    const title = svg.querySelector('text.cum-title')!;
+    expect(title.textContent).toBe('累计概率');
+    // 竖排（绕自己的位置转 90°），把右上角让给角标
+    expect(title.getAttribute('transform')).toMatch(/^rotate\(90 /);
   });
 
-  it('段内标注放得下才画（小段交给浮框）', () => {
+  it('累计概率可以关掉：曲线、节点、刻度、轴名一起消失', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip(), showCum: false });
+    expect(svg.querySelector('path.cum-line')).toBeNull();
+    expect(svg.querySelectorAll('rect.cum-dot')).toHaveLength(0);
+    expect(svg.querySelectorAll('text.cum-label')).toHaveLength(0);
+    expect(svg.querySelector('text.cum-title')).toBeNull();
+    // 柱子还在，柱顶也照标
+    expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(6);
+    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual([
+      '15.0%',
+      '50.0%',
+      '20.0%',
+      '15.0%',
+    ]);
+  });
+
+  it('柱顶标注：大于 4% 的一律标出来', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual([
+      '15.0%',
+      '50.0%',
+      '20.0%',
+      '15.0%',
+    ]);
+  });
+
+  it('柱顶标注与累计刻度快要叠在一起时，舍刻度保柱顶', () => {
+    // 3 分那根：柱顶 50%、累计 70% 缩进柱子量纲后正好落在柱顶上方 4px（< 11px）
+    const tight: Bars = [
+      { score: 0, total: 0.3, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.3 }] },
+      { score: 3, total: 0.5, atLeast: 0.7, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.5 }] },
+    ];
+    const svg = renderQualityStacked({ bars: tight, tooltip: makeTooltip() });
+    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual([
+      '30.0%',
+      '50.0%',
+    ]);
+    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual(['100.0%']);
+  });
+
+  it('右轴刻度自己也不叠：末尾两根小柱子的累计值只差几个像素就舍掉后面那个', () => {
+    // 结构用的合成数据：两根小柱子（3% / 1%）在 0.8 的纵轴上几乎贴着底边，
+    // 它们的累计值只差 7px —— 旧版会把 `1.0%` 直接压在 `3.0%` 上。
+    const tail: Bars = [
+      { score: 0, total: 0.5, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.5 }] },
+      { score: 2, total: 0.03, atLeast: 0.03, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.03 }] },
+      { score: 4, total: 0.01, atLeast: 0.01, segments: [{ label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.01 }] },
+    ];
+    const svg = renderQualityStacked({ bars: tail, tooltip: makeTooltip() });
+    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual([
+      '100.0%',
+      '3.0%',
+    ]);
+  });
+
+  it('柱子特别小时不标：小柱子既没有柱顶值，也不画段内文字', () => {
+    const mixed: Bars = [
+      { score: 0, total: 0.5, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.5 }] },
+      {
+        score: 2,
+        total: 0.02,
+        atLeast: 0.02,
+        segments: [
+          { label: '暴击', attrs: ['暴击'], size: 1, p: 0.019 },
+          { label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.001 },
+        ],
+      },
+    ];
+    const svg = renderQualityStacked({ bars: mixed, tooltip: makeTooltip() });
+    // 只有 50% 那根柱子配得上柱顶值
+    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual(['50.0%']);
+    expect([...svg.querySelectorAll('text.seg-label')].map((n) => n.textContent)).toEqual(['无有效词条']);
+    // 小柱子的柱顶没标，所以它那条累计刻度不必让路，照画
+    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual(['100.0%', '2.0%']);
+  });
+
+  it('段内标注：名字放得下就画（长名字折成两行），概率跟在后面', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
     const names = [...svg.querySelectorAll('text.seg-label')].map((n) => n.textContent);
-    // 图例里也有文字，这里只看段内标注
-    expect(names).not.toContain('暴击 + 精通 + 大攻击 + 暴伤'); // 11 字放不进柱宽
-    expect(svg.querySelectorAll('text.seg-pct').length).toBe(names.length);
+    expect(names).toContain('暴击');
+    expect(names).toContain('暴击+精通');
+    // 4 条词条的名字在柱宽里一行写不下 → 折成两行，不是一个长名字也不是不画
+    expect(names).not.toContain('暴击+精通+大攻击+暴伤');
+    expect(names).toContain('大攻击+暴伤');
+    // 6 个段画得下标注；折行的那一个占两行名字，概率仍然每段一行
+    expect(names).toHaveLength(7);
+    expect(svg.querySelectorAll('text.seg-pct')).toHaveLength(6);
   });
 
   it('每根柱子一块热区 + 一条竖线（悬停交互）', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
-    expect(svg.querySelectorAll('rect.hot-rect')).toHaveLength(3);
+    expect(svg.querySelectorAll('rect.hot-rect')).toHaveLength(4);
     expect(svg.querySelector('line.guide')).not.toBeNull();
   });
 
-  it('悬停给出该分数的组合明细，且不重复合计与累计', () => {
+  it('悬停给出该分数的组合明细 + 累计概率，且不重复合计', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const tooltip = new Tooltip(host);
@@ -535,13 +646,24 @@ describe('质量分布（详细）', () => {
     expect(badge).toBe('50.00%');
     const rows = [...tt.querySelectorAll('.tt-row')].map((r) => r.textContent);
     expect(rows.some((t) => t!.includes('暴击 + 精通'))).toBe(true);
+    // 累计概率在图上只是一条线，读不出数值 → 浮框里给出来（作者要求）
+    expect(rows.some((t) => t!.includes('累计概率 ≥ 该分数') && t!.includes('85.00%'))).toBe(true);
 
     // 作者点名：「本分数合计」与右上角的 badge 是同一个数，不许再出现
     expect(tt.textContent).not.toContain('本分数合计');
-    // 累计概率已经标在右轴上，浮框里不再抄一遍
-    expect(tt.textContent).not.toContain('P(得分 ≥');
     // 同一个数在浮框里只出现一次
     expect(occurrences(tt.textContent!, badge)).toBe(1);
+  });
+
+  it('关掉累计概率时，浮框里也不给那一行', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(renderQualityStacked({ bars, tooltip, showCum: false }));
+    host
+      .querySelectorAll('rect.hot-rect')[1]!
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(host.querySelector('.tooltip')!.textContent).not.toContain('累计概率');
   });
 
   it('勾选的词条：命中的段挑出来，其余压暗', () => {
@@ -566,9 +688,47 @@ describe('质量分布（详细）', () => {
     expect(svg.querySelectorAll('.seg-hit, .seg-dim')).toHaveLength(0);
   });
 
+  it('勾选词的合计标在图内右上角', () => {
+    const svg = renderQualityStacked({
+      bars,
+      highlight: ['暴击'],
+      pickNote: { label: '含 暴击', value: '12.34%' },
+      tooltip: makeTooltip(),
+    });
+    const value = svg.querySelector('text.pick-value')!;
+    expect(value.textContent).toBe('12.34%');
+    expect(svg.querySelector('text.pick-label')!.textContent).toBe('含 暴击');
+    // 右上角：x 在右半边、y 在标题行那一带（图内，不压到柱子上）
+    expect(Number(value.getAttribute('x'))).toBeGreaterThan(500);
+    expect(Number(value.getAttribute('y'))).toBeLessThan(40);
+    expect(value.getAttribute('text-anchor')).toBe('end');
+  });
+
+  it('不勾选就不画角标（没有「合计」可标）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect(svg.querySelector('text.pick-value')).toBeNull();
+    expect(svg.querySelector('text.pick-label')).toBeNull();
+  });
+
   it('空数据不抛错', () => {
     const svg = renderQualityStacked({ bars: [], tooltip: makeTooltip() });
     expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(0);
+  });
+});
+
+describe('组合名的宽度估算与折行', () => {
+  it('汉字算全宽、`+` 与数字算 0.55 宽（旧版把它们等宽，白占位置）', () => {
+    expect(textWidth('暴击')).toBeCloseTo(19, 6);
+    expect(textWidth('+')).toBeCloseTo(5.225, 6);
+    expect(textWidth('暴击+暴伤')).toBeCloseTo(43.225, 6);
+  });
+
+  it('放得下就一行，放不下只在 `+` 处折成两行', () => {
+    expect(wrapCombo('暴击 + 暴伤', 100)).toEqual(['暴击+暴伤']);
+    // 「暴击+精通」43.2、「大攻击+暴伤」52.7：柱宽 55 只放得下这一种折法
+    expect(wrapCombo('暴击 + 精通 + 大攻击 + 暴伤', 55)).toEqual(['暴击+精通', '大攻击+暴伤']);
+    // 折两行还是放不下（词条名太长）→ 交给浮框
+    expect(wrapCombo('大攻击 + 暴击 + 暴伤 + 精通', 20)).toBeNull();
   });
 });
 

@@ -193,13 +193,24 @@ export function topPercent(alpha: number): string {
 /**
  * 质量分布（堆叠柱 + 累计概率）。
  *
- * 前一句是这一页与「得分分布」的口径差别；后两句交代图上读不出来的事：
- * 柱子按什么拆、红线读哪根轴。
+ * 要交代三件图上读不出来的事：
+ *   1. 这一页与「得分分布」的口径差别（只看掉落那一刻，不含强化）；
+ *   2. **段色只在一根柱子内有意义**（这正是它与参考实现的差别所在）；
+ *   3. 红线是累计概率，读右轴。
  */
 export const QUALITY_DIST_HINT =
-  '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，' +
-  '颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。';
+  '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，颜色只区分同一根柱子' +
+  '里的段；红线为累计概率（右轴）。';
 export const COMBOS_HINT = '得分最高的那一项已摘出并固定在左上角；概率过小的长尾合并为「其他」。';
+/** 勾选框的口径：勾多条是「同时含」而不是「含其中任意一条」 */
+export const QUALITY_PICK_HINT = '勾选 = 同时含这几条';
+/** 画不画累计概率曲线的勾选框 */
+export const CUM_SERIES = '累计概率';
+/** 图内右上角的标注：勾选了哪几条、这些胚子占多少 */
+export function pickedLabel(attrs: readonly string[]): string {
+  // 词条多了会顶到画布边上，改用条数交代（勾选框就在图上方，不用在图里再列一遍）
+  return attrs.length <= 3 ? `含 ${attrs.join(' + ')}` : `含勾选的 ${attrs.length} 条`;
+}
 export const ATTRS_HINT = '「胚子含该词条」的概率；词条不重复，故不等于权重占比。';
 export const TH_ATTR = '词条';
 export const TH_ATTR_PROB = '出现概率';

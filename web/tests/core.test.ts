@@ -19,7 +19,7 @@ import {
   type MainAttr,
   type SubAttr,
 } from '../src/core/stats';
-import { dropProbability } from '../src/core/quality';
+import { dropProbability, qualityDistribution, qualityProbContaining } from '../src/core/quality';
 import { exact4ComboProb, attrsProb, allPossibleAttrsProb, combinations } from '../src/core/combo';
 import {
   scoreDistribution,
@@ -490,6 +490,45 @@ describe('掉落概率', () => {
 // ---------------------------------------------------------------------------
 // 分桶
 // ---------------------------------------------------------------------------
+describe('勾选词条的合计（质量分布图右上角那个数）', () => {
+  // 「胚子质量」的默认口径：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2
+  const d = qualityDistribution({
+    mainAttr: '火伤',
+    weights: { 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 },
+  });
+
+  it('一条都不勾时是必然事件（返回 1，调用方不用特判）', () => {
+    expect(qualityProbContaining(d, [])).toBe(1);
+  });
+
+  it('勾一条 = 该词条的出现概率（与「词条概率」表同一个数）', () => {
+    for (const a of d.attrProbs) {
+      expect(qualityProbContaining(d, [a.attr]), a.attr).toBeCloseTo(a.p, 12);
+    }
+  });
+
+  it('勾两条 = 同时含这两条，而不是两条边缘概率相加', () => {
+    const both = qualityProbContaining(d, ['暴击', '暴伤']);
+    expect(both).toBeCloseTo(0.0669, 4);
+    const marginals = d.attrProbs
+      .filter((a) => a.attr === '暴击' || a.attr === '暴伤')
+      .reduce((s, a) => s + a.p, 0);
+    // 边缘概率相加会把「只含其中一条」的胚子重复计入，所以必然更大
+    expect(both).toBeLessThan(marginals);
+  });
+
+  it('就是「含这几条的组合概率之和」：逐项相加，不重不漏', () => {
+    const manual = d.combos
+      .filter((c) => c.combo.includes('精通') && c.combo.includes('大攻击'))
+      .reduce((s, c) => s + c.p, 0);
+    expect(qualityProbContaining(d, ['精通', '大攻击'])).toBeCloseTo(manual, 12);
+  });
+
+  it('勾 5 条时为 0（终态只有 4 条副词条）', () => {
+    expect(qualityProbContaining(d, ['暴击', '暴伤', '精通', '大攻击', '充能'])).toBe(0);
+  });
+});
+
 describe('分桶', () => {
   /** 造一组「分数 → 各命中档概率」的输入 */
   const rows = (scores: number[]) => scores.map(() => [0.1, 0.2, 0.3]);

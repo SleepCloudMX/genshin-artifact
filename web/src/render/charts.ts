@@ -164,11 +164,16 @@ function frame(opts: {
   margin: { top: number; right: number; bottom: number; left: number };
   /** `undefined` = 不画图内标题（`exactOptionalPropertyTypes` 下不能传可选属性） */
   title: string | undefined;
+  /**
+   * 没有图内标题时预留的顶部高度（图内角标用）。
+   * 默认 16：不画标题就不留白；要往右上角放东西的图把它调大。
+   */
+  header?: number;
   ariaLabel: string;
 }): Frame {
   const { width, height, title, ariaLabel } = opts;
   // 没有图内标题时不需要顶部留白（面板标题由外层 HTML 负责，语义更好）
-  const margin = { ...opts.margin, top: title ? opts.margin.top : 16 };
+  const margin = { ...opts.margin, top: title ? opts.margin.top : (opts.header ?? 16) };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
 
@@ -756,8 +761,77 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 胚子质量（详细）：按组合堆叠的柱 + 累计概率曲线
+// 4. 胚子质量：按组合堆叠的柱 + 累计概率曲线
 // ---------------------------------------------------------------------------
+
+/**
+ * 段色盘：**只用来区分同一根柱子里的段**。
+ *
+ * 相邻两项刻意选得远（蓝→红→绿→紫……），这样一根柱子从上到下都分得清；
+ * 跨柱子**不表示任何含义** —— 同一根柱子里第 k 段永远是同一个颜色，
+ * 换个分数就换了组合，颜色不跟着走。作者明确说了「不同列的柱子不需要区分度」，
+ * 参考实现也是这么画的（只是它按概率排序取色，我们按堆叠顺序，更稳）。
+ *
+ * 不含橙色系：高亮描边用的是 `#ff8c00`，段色里再出现橙黄就跟它撞了。
+ * 全是中深色，段内白字在任何一段上都读得清。
+ */
+export const SEGMENT_COLORS = [
+  '#2563eb', // 蓝
+  '#dc2626', // 红
+  '#059669', // 绿
+  '#7c3aed', // 紫
+  '#0891b2', // 青
+  '#db2777', // 品红
+  '#65a30d', // 黄绿
+  '#4f46e5', // 靛
+  '#0d9488', // 蓝绿
+  '#475569', // 石板灰
+];
+
+export function segmentColor(index: number): string {
+  return SEGMENT_COLORS[index % SEGMENT_COLORS.length]!;
+}
+
+/** 累计概率曲线（红线）的颜色。CSS 里也有一份，浮框的色块要与线一致 */
+const CUM_COLOR = '#e74c3c';
+
+/**
+ * 估算一段文字的宽度。SVG 里拿不到真实排版宽度（`getComputedTextLength` 在
+ * jsdom 与未挂载时是 0），所以按字数估：汉字（含全角标点）算一个全宽，
+ * 其余（数字、`%`、`+`）算 0.55 —— 比「一律按字数 × 字号」准得多，
+ * 组合名里的 `+` 不再白占一个汉字位。
+ */
+export function textWidth(s: string, fontSize = 9.5): number {
+  let w = 0;
+  for (const ch of s) w += /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? fontSize : fontSize * 0.55;
+  return w;
+}
+
+/**
+ * 把组合名折成 1~2 行塞进 `width`；塞不下返回 `null`（交给浮框）。
+ *
+ * 折点只在 `+` 上：组合名本来就是「词条 + 词条」，从那里断开不会读错。
+ * 「大攻击+暴击+精通」这种 3 条词条的名字在柱宽下写不下，折成两行就写得下了。
+ */
+export function wrapCombo(label: string, width: number, fontSize = 9.5): string[] | null {
+  // 名字去掉 `+` 两侧的空格：`暴击 + 精通` 会白占两个字符位
+  const compact = label.replace(/ \+ /g, '+');
+  if (textWidth(compact, fontSize) <= width) return [compact];
+  const parts = compact.split('+');
+  if (parts.length < 2) return null;
+
+  let best: string[] | null = null;
+  let bestW = Infinity;
+  for (let i = 1; i < parts.length; i++) {
+    const lines = [parts.slice(0, i).join('+'), parts.slice(i).join('+')];
+    const w = Math.max(...lines.map((l) => textWidth(l, fontSize)));
+    if (w <= width && w < bestW) {
+      best = lines;
+      bestW = w;
+    }
+  }
+  return best;
+}
 
 /** 一根柱子里的一个组合段 */
 export interface QualitySegment {
@@ -765,7 +839,7 @@ export interface QualitySegment {
   label: string;
   /** 组合里的词条（勾选框靠它判断高亮） */
   attrs: SubAttr[];
-  /** 组合里有几条有效词条（= 颜色档，也是堆叠顺序） */
+  /** 组合里有几条有效词条（只用于决定堆叠顺序） */
   size: number;
   /** 该组合占全部胚子的概率 */
   p: number;
@@ -793,6 +867,15 @@ export interface QualityChartOptions {
    * （`set(highlight).issubset(combo)`）。空集合 = 不高亮（全部正常显示）。
    */
   highlight?: readonly SubAttr[];
+  /**
+   * 右上角的角标：勾选了哪几条、同时含这几条的胚子占多少。
+   *
+   * 文案由调用方给（`ui/copy.ts` 是全部界面文字的唯一出处），这里只管画。
+   * `highlight` 为空时不传，也就不画。
+   */
+  pickNote?: { label: string; value: string };
+  /** 是否画累计概率（红线 + 右轴）。默认画；勾选框可以关掉 */
+  showCum?: boolean;
   /** 图内标题；通常由外层 HTML 负责 */
   title?: string;
   host?: HTMLElement | null;
@@ -802,7 +885,7 @@ export interface QualityChartOptions {
 }
 
 /**
- * 胚子质量的**详细**分布：每根柱子按「是哪几条词条的组合」拆开堆叠，
+ * 胚子质量分布：每根柱子按「是哪几条词条的组合」拆开堆叠，
  * 再把累计概率 `P(得分 ≥ 该分数)` 叠成一条红线。
  *
  * ## 为什么这一张图允许「两个量纲同框」
@@ -815,26 +898,35 @@ export interface QualityChartOptions {
  *
  * ## 堆叠顺序与配色
  *
- * 段按**组合里的有效词条条数**从少到多堆（0 条在最下、4 条在最上），同档内按概率降序；
- * 颜色同样按条数取 `hitColor(size)`。这样「同一条数 = 同一颜色」在全站成立，
- * 而且不用看图例就能读出「这截是几条词条凑出来的」。
- * （参考实现按概率排序、颜色取堆叠序号，颜色在每根柱子里含义都不同，读不出来。）
+ * 段按**组合里的有效词条条数**从少到多堆（0 条在最下、4 条在最上），同档内按概率降序。
+ * 颜色按**堆叠顺序**取 `SEGMENT_COLORS`：同一根柱子里的段必定不同色，
+ * 而跨柱子不复用同一套编码（作者要的就是这个：柱内要分得清，列间不必一致）。
+ *
+ * ## 标注
+ *
+ * 柱顶标总概率、柱内标组合名与它的概率，两条都是「放得下才画」，
+ * 但**大于 4% 的柱子一定标柱顶**（作者要求）—— 挤到累计刻度时舍掉刻度，保柱顶。
  */
 export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
   const { bars, title, tooltip } = opts;
   const highlight = opts.highlight ?? [];
+  const showCum = opts.showCum ?? true;
   /** 该组合是否含全部被勾选的词条 */
   const isHit = (s: QualitySegment): boolean =>
     highlight.length > 0 && highlight.every((a) => s.attrs.includes(a));
+
   const fit = fitSize(opts.host, SHARED_FIT);
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
   const f = frame({
     width,
     height,
-    margin: { top: 40, right: 66, bottom: 74, left: 56 },
+    // 右轴（累计概率）不画时不必留那条轴的位置
+    margin: { top: 40, right: showCum ? 72 : 18, bottom: 58, left: 56 },
     title,
-    ariaLabel: title ?? '胚子质量分布（详细）',
+    // 没有图内标题也要留白：右上角要放「含勾选词条的胚子比例」
+    header: 40,
+    ariaLabel: title ?? '胚子质量分布',
   });
 
   if (bars.length === 0) return f.svg;
@@ -849,133 +941,200 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
   const yOf = (v: number): number => f.plotH - (v / axis.max) * f.plotH;
   const yOfCum = (v: number): number => yOf((v / 1.1) * axis.max);
 
-  // --- 累计概率的右侧刻度与虚线 ---
-  for (const [i, b] of bars.entries()) {
-    if (b.atLeast < 0.001) continue;
-    const y = yOfCum(b.atLeast);
-    f.plot.append(
-      el('line', {
-        x1: xOf(i),
-        x2: f.plotW,
-        y1: y,
-        y2: y,
-        class: 'cum-guide',
-      }),
-    );
-    f.plot.append(
-      text(pctTick(b.atLeast, 0.001), {
-        x: f.plotW + 6,
-        y: y + 3.5,
-        'text-anchor': 'start',
-        class: 'cum-label',
-      }),
-    );
-  }
-  f.plot.append(
-    text('累计概率', {
-      x: f.plotW + 6,
-      y: -8,
-      'text-anchor': 'start',
-      class: 'cum-title',
-    }),
+  /** 堆叠顺序：条数少的在下面，同档按概率降序。颜色按这个顺序取 */
+  const segsOf = bars.map((b) => [...b.segments].sort((x, y) => x.size - y.size || y.p - x.p));
+  /** 段 → 颜色，浮框的色块要与图上画的那一段对上 */
+  const colorOf = new Map<QualitySegment, string>();
+
+  // --- 标注放不放得下：先算，画的时候按这个来 ---
+  //
+  // 柱顶标注的口径（作者要求）：**大于 4% 的一定标**；更小的柱子只在还算显眼时标
+  // （≥ 纵轴上限的 8%），柱子太密到 26px 以下就一律不标 —— 标号会互相压字。
+  // 这套口径**与「画不画累计曲线」无关**：同一个开关不该让标注变来变去。
+  const BIG_BAR = 0.04;
+  const BAR_LABEL_MIN = 0.08;
+  /** 柱顶标注与累计刻度挨得比这个还近时，让刻度让路 */
+  const MIN_GAP = 11;
+  const labelsFit = bandW >= 26;
+  const barLabel = bars.map(
+    (b) => labelsFit && (b.total > BIG_BAR || b.total >= axis.max * BAR_LABEL_MIN),
   );
+  /**
+   * 累计刻度画不画。
+   *
+   * 柱顶值在柱子正上方、累计刻度在图的右边缘，两者竖直方向挨得近时会显得挤；
+   * 作者要求「> 4% 的柱子一定要标」，所以挤的时候让**刻度**让路 ——
+   * 刻度只是辅助，累计概率在浮框里也给了。
+   *
+   * 判据取**绝对**竖直距离：累计曲线是按 `v / 1.1` 缩放进柱子量纲的，
+   * 它落在柱顶上面还是下面都不一定（多数柱子上在下面，离得很远）。
+   */
+  const cumLabel = bars.map(
+    (b, i) =>
+      showCum &&
+      b.atLeast >= 0.001 &&
+      !(barLabel[i] && Math.abs(yOf(b.total) - yOfCum(b.atLeast)) < MIN_GAP),
+  );
+  // 刻度之间也不许叠：末尾几根柱子的概率都很小，累计值挨得很近（`2.6%` 压在 `0.2%` 上）。
+  // 从上往下扫，离上一个刻度太近的就不画 —— 刻度是参考，缺一格不影响读图。
+  let lastCumY = -Infinity;
+  bars.forEach((b, i) => {
+    if (!cumLabel[i]) return;
+    const y = yOfCum(b.atLeast);
+    if (y - lastCumY < MIN_GAP) {
+      cumLabel[i] = false;
+      return;
+    }
+    lastCumY = y;
+  });
+
+  // --- 累计概率：每根柱子一条虚线引到右轴 ---
+  if (showCum) {
+    bars.forEach((b, i) => {
+      if (!cumLabel[i]) return;
+      const y = yOfCum(b.atLeast);
+      f.plot.append(el('line', { x1: xOf(i), x2: f.plotW, y1: y, y2: y, class: 'cum-guide' }));
+    });
+  }
 
   // --- 柱子：按组合的条数从少到多堆 ---
   bars.forEach((b, i) => {
-    const segs = [...b.segments].sort((x, y) => x.size - y.size || y.p - x.p);
     const x = xOf(i);
     let bottom = 0;
-    for (const s of segs) {
+    for (const [k, s] of segsOf[i]!.entries()) {
       if (s.p <= 0) continue;
       const y0 = yOf(bottom + s.p);
       const h = yOf(bottom) - y0;
+      const color = segmentColor(k);
+      colorOf.set(s, color);
       const rect = el('rect', {
         x: x - barW / 2,
         y: y0,
         width: barW,
         height: Math.max(h, 0.6),
-        fill: hitColor(s.size),
+        fill: color,
         class: 'bar-seg',
       });
       // 勾选框的命中段：描边挑出来，其余压暗。压暗比「换个颜色」更能看清
-      // 「哪些段属于它」，而且不会把「段色 = 几条有效词条」这套编码毁掉。
+      // 「哪些段属于它」，而且不会把段色这套编码毁掉。
       if (highlight.length > 0) {
         rect.classList.add(isHit(s) ? 'seg-hit' : 'seg-dim');
       }
       f.plot.append(rect);
-      // 段内标注是两行（名字 + 概率），所以高度要够两行才画，否则字会压出段外；
-      // 宽度也要够（柱宽只有几十像素）。放不下就交给浮框。
-      // 名字去掉 `+` 两侧的空格：`暴击 + 精通` 会白占两个字符位。
-      const compact = s.label.replace(/ \+ /g, '+');
-      const fits = h >= 23 && compact.length * 9.4 <= barW - 4;
-      if (fits) {
-        // 压暗的段，它的字也得跟着压暗，否则白字浮在灰底上很脏
+
+      // 段内标注：名字（1~2 行）+ 概率。高度不够就整段交给浮框 ——
+      // 字压出段外比不标更难读。两行字连行距约占 20px，留 2px 上下余量。
+      const lines = wrapCombo(s.label, barW - 6);
+      const rows = lines ? lines.length + 1 : 0;
+      if (lines && h >= rows * 10 + 2) {
         const dim = highlight.length > 0 && !isHit(s);
-        const name = text(compact, {
-          x,
-          y: y0 + h / 2 - 2.5,
-          'text-anchor': 'middle',
-          class: 'seg-label',
+        const top = y0 + h / 2 - ((rows - 1) * 10) / 2 + 3.5;
+        lines.forEach((line, n) => {
+          const t = text(line, {
+            x,
+            y: top + n * 10,
+            'text-anchor': 'middle',
+            class: 'seg-label',
+          });
+          if (dim) t.classList.add('seg-dim');
+          f.plot.append(t);
         });
         const value = text(pct(s.p, 1), {
           x,
-          y: y0 + h / 2 + 8,
+          y: top + lines.length * 10,
           'text-anchor': 'middle',
           class: 'seg-pct',
         });
-        if (dim) {
-          name.classList.add('seg-dim');
-          value.classList.add('seg-dim');
-        }
-        f.plot.append(name, value);
+        if (dim) value.classList.add('seg-dim');
+        f.plot.append(value);
       }
       bottom += s.p;
-    }
-    // 柱顶总概率。**与自己那条累计刻度会挤在一起时不画**：累计曲线是缩放进柱子量纲的，
-    // 概率越小两条标签的竖直间距越小（最后一根柱子上 `柱顶 = 累计`，必然重叠）。
-    const gap = ((b.total - b.total / 1.1) / axis.max) * f.plotH;
-    if (gap >= 12) {
-      f.plot.append(
-        text(pct(b.total, 1), {
-          x,
-          y: yOf(b.total) - 5,
-          'text-anchor': 'middle',
-          class: 'bar-label',
-        }),
-      );
     }
   });
 
   // --- 累计概率折线 ---
-  const cum = bars
-    .map((b, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)},${yOfCum(b.atLeast).toFixed(2)}`)
-    .join(' ');
-  f.plot.append(el('path', { d: cum, class: 'cum-line' }));
-  bars.forEach((b, i) => {
+  if (showCum) {
+    const cum = bars
+      .map((b, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)},${yOfCum(b.atLeast).toFixed(2)}`)
+      .join(' ');
+    f.plot.append(el('path', { d: cum, class: 'cum-line' }));
+    bars.forEach((b, i) => {
+      f.plot.append(
+        el('rect', {
+          x: xOf(i) - 3,
+          y: yOfCum(b.atLeast) - 3,
+          width: 6,
+          height: 6,
+          transform: `rotate(45 ${xOf(i).toFixed(2)} ${yOfCum(b.atLeast).toFixed(2)})`,
+          class: 'cum-dot',
+        }),
+      );
+    });
+
+    // 真实概率标在右轴外侧；轴名竖排，免得与右上角的角标抢地方
+    bars.forEach((b, i) => {
+      if (!cumLabel[i]) return;
+      f.plot.append(
+        text(pctTick(b.atLeast, 0.001), {
+          x: f.plotW + 6,
+          y: yOfCum(b.atLeast) + 3.5,
+          'text-anchor': 'start',
+          class: 'cum-label',
+        }),
+      );
+    });
+    // 竖排轴名落在「刻度数字」与画布右边缘之间：刻度数字最多约 38px 宽（`100.0%`），
+    // 右边距 72px，所以中缝在 plotW + 58 左右 —— 两边各留 6~8px。
+    const titleX = f.plotW + 58;
     f.plot.append(
-      el('rect', {
-        x: xOf(i) - 3,
-        y: yOfCum(b.atLeast) - 3,
-        width: 6,
-        height: 6,
-        transform: `rotate(45 ${xOf(i).toFixed(2)} ${yOfCum(b.atLeast).toFixed(2)})`,
-        class: 'cum-dot',
+      text('累计概率', {
+        x: titleX,
+        y: f.plotH / 2,
+        transform: `rotate(90 ${titleX} ${f.plotH / 2})`,
+        'text-anchor': 'middle',
+        class: 'cum-title',
+      }),
+    );
+  }
+
+  // --- 柱顶总概率 ---
+  bars.forEach((b, i) => {
+    if (!barLabel[i]) return;
+    f.plot.append(
+      text(pct(b.total, 1), {
+        x: xOf(i),
+        y: yOf(b.total) - 5,
+        'text-anchor': 'middle',
+        class: 'bar-label',
       }),
     );
   });
+
+  // --- 勾选词条的合计：图的右上角 ---
+  if (opts.pickNote) {
+    const valueX = width - 12;
+    f.svg.append(
+      text(opts.pickNote.value, {
+        x: valueX,
+        y: 32,
+        'text-anchor': 'end',
+        class: 'pick-value',
+      }),
+    );
+    f.svg.append(
+      text(opts.pickNote.label, {
+        x: valueX - textWidth(opts.pickNote.value, 12) - 8,
+        y: 32,
+        'text-anchor': 'end',
+        class: 'pick-label',
+      }),
+    );
+  }
 
   xAxis(
     f,
     tickIndices(bars.length, 12).map((i) => ({ x: xOf(i), text: String(bars[i]!.score) })),
     '胚子得分（分）',
-  );
-  legend(
-    f,
-    [0, 1, 2, 3, 4].map((n) => ({
-      label: n === 0 ? '无有效词条' : `${n} 条有效词条`,
-      color: hitColor(n),
-    })),
-    f.plotH + 46,
   );
 
   // --- 悬停：每列一块热区（浏览器做命中测试，不自己换算坐标） ---
@@ -996,15 +1155,19 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
-      // 明细行 = 这根柱子由哪些组合凑成（图上只标得下几个）。
+      // 明细行 = 这根柱子由哪些组合凑成（图上标不下的，浮框里都有）。
       // 本分数的合计已经在 badge 里了，**不要再补一行「本分数合计」**。
       const rows: TooltipRow[] = [...b.segments]
         .sort((p, q) => q.p - p.p)
         .map((s) => ({
           label: s.label,
           value: pct(s.p, 2),
-          color: hitColor(s.size),
+          color: colorOf.get(s) ?? segmentColor(0),
         }));
+      // 累计概率：曲线本身读不出具体数值，作者要求标在浮框里
+      if (showCum) {
+        rows.push({ label: '累计概率 ≥ 该分数', value: pct(b.atLeast, 2), color: CUM_COLOR });
+      }
       tooltip.show(
         {
           title: `${b.score} 分`,
