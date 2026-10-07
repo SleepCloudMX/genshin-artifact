@@ -567,6 +567,42 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelectorAll('.sidebar .tree-sub')).toHaveLength(10);
   });
 
+  it('窄屏的目录抽屉：标题左侧的按钮开合，点条目或遮罩就收起', () => {
+    // 作者 2026-10-08：「半屏时没有目录……在 “圣遗物词条概率分布” 左侧加个按钮展开目录」
+    const root = freshRoot();
+    mount(root);
+    const toggle = root.querySelector<HTMLButtonElement>('.nav-toggle')!;
+    const backdrop = root.querySelector<HTMLElement>('.nav-backdrop')!;
+    const open = () => root.classList.contains('nav-open');
+
+    expect(open()).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    expect(open()).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    // 抽屉里那一行有「目录」和收起按钮
+    expect(root.querySelector('.nav-head-title')!.textContent).toBe(C.NAV_TOGGLE);
+    root.querySelector<HTMLButtonElement>('.nav-close')!.click();
+    expect(open()).toBe(false);
+
+    // 遮罩一点就收
+    toggle.click();
+    backdrop.click();
+    expect(open()).toBe(false);
+
+    // 在抽屉里点条目（**当前任务**的子项也要收，否则抽屉一直盖着图表）
+    toggle.click();
+    [...root.querySelectorAll<HTMLButtonElement>('.sidebar .tree-sub')]
+      .find((b) => b.textContent === C.SUB_HITS)!.click();
+    expect(open()).toBe(false);
+    expect(root.querySelector('.tab-panel:not([hidden]) .subtab.on')!.textContent).toBe(C.SUB_HITS);
+
+    // 点主任务也收
+    toggle.click();
+    clickTab(root, 'basic');
+    expect(open()).toBe(false);
+  });
+
   it('配置栏在图表**右侧**，且跟着任务走；不需要配置的任务只把这一栏藏起来', () => {
     const root = freshRoot();
     mount(root);

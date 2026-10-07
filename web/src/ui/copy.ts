@@ -12,6 +12,11 @@
 
 export const APP_TITLE = '圣遗物词条概率分布';
 
+/** 窄屏标题左侧那个按钮：把目录当抽屉抽出来（宽屏目录常驻，按钮不显示） */
+export const NAV_TOGGLE = '目录';
+/** 抽屉里的收起按钮 */
+export const NAV_CLOSE = '收起目录';
+
 export const THEME_TO_LIGHT = '切换到浅色主题';
 export const THEME_TO_DARK = '切换到深色主题';
 

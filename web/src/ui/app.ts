@@ -239,6 +239,28 @@ function repoIcon(): SVGSVGElement {
   return svg;
 }
 
+/** 「目录」按钮的图标：三条横杠（只用 SVG，与另外两个图标一个路数） */
+function navIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const y of [7, 12, 17]) {
+    const line = document.createElementNS(SVG_NS, 'line');
+    line.setAttribute('x1', '4');
+    line.setAttribute('x2', '20');
+    line.setAttribute('y1', String(y));
+    line.setAttribute('y2', String(y));
+    svg.append(line);
+  }
+  return svg;
+}
+
 // ---------------------------------------------------------------------------
 // 子 tab
 // ---------------------------------------------------------------------------
@@ -345,9 +367,25 @@ export function mount(root: HTMLElement): void {
   root.dataset.mounted = '1';
 
   // ---- 标题栏 ----
+  // 标题 / GitHub / 主题这三个**置顶**（作者 2026-10-08），所以它是一条 sticky 的横条，
+  // 下面那道细线是它的下边框（内容从下面滚过去，线自然就出来了）。
   const hero = node('header', { class: 'hero' });
   const titleRow = node('div', { class: 'title-row' });
-  titleRow.append(node('h1', {}, C.APP_TITLE));
+
+  // 窄屏（≤1180px）没有常驻的目录栏：这个按钮把目录抽出来当抽屉
+  // （作者：「半屏时没有目录……在标题左侧加个按钮展开目录」）。
+  // 宽屏目录一直摆着，按钮隐藏 —— 不占地方。
+  const navToggle = node('button', {
+    type: 'button',
+    class: 'nav-toggle',
+    id: 'navToggle',
+    title: C.NAV_TOGGLE,
+    'aria-label': C.NAV_TOGGLE,
+    'aria-expanded': 'false',
+    'aria-controls': 'navTree',
+  });
+  navToggle.append(navIcon());
+  titleRow.append(navToggle, node('h1', {}, C.APP_TITLE));
 
   // 右侧图标组：源码仓库 + 主题切换。一起放在 `.title-actions` 里靠右对齐，
   // 免得 `margin-left: auto` 只作用在第一个图标上。
@@ -372,17 +410,45 @@ export function mount(root: HTMLElement): void {
   // ---- 三栏：任务树 / 图表 / 这个任务的配置 ----
   const layout = node('div', { class: 'layout' });
   const sidebar = node('aside', { class: 'sidebar' });
-  const tree = node('nav', { class: 'tree', 'aria-label': '任务' });
-  sidebar.append(tree);
+  const tree = node('nav', { class: 'tree', 'aria-label': '任务', id: 'navTree' });
+  // 抽屉顶上那一行（只在窄屏显示）：写「目录」并给一个收起按钮 ——
+  // 抽屉一打开就盖住了标题行左侧那个按钮，得留个关得掉的地方。
+  const navHead = node('div', { class: 'nav-head' });
+  const navClose = node('button', {
+    type: 'button',
+    class: 'nav-close',
+    'aria-label': C.NAV_CLOSE,
+    title: C.NAV_CLOSE,
+  });
+  navClose.textContent = '×';
+  navHead.append(node('span', { class: 'nav-head-title' }, C.NAV_TOGGLE), navClose);
+  sidebar.append(navHead, tree);
   const results = node('main', { class: 'results' });
   const panelHost = node('div', { class: 'tab-panels', id: 'tabPanels' });
   const configHost = node('aside', { class: 'config-col', id: 'config' });
   results.append(panelHost);
   layout.append(sidebar, results, configHost);
 
+  // 窄屏抽屉的遮罩：点它收起目录（宽屏时这个元素一直藏着）
+  const navBackdrop = node('div', { class: 'nav-backdrop' });
+
   const tooltipHost = node('div', { class: 'tooltip-host' });
-  root.append(layout, tooltipHost);
+  root.append(layout, navBackdrop, tooltipHost);
   const tooltip = new Tooltip(tooltipHost);
+
+  /**
+   * 目录抽屉的开合（只在窄屏有意义；宽屏目录一直摆着，按钮也不显示）。
+   *
+   * 状态挂在 `#app` 的类上，CSS 那边用 `.nav-open .sidebar` 滑出来 ——
+   * 与「侧边栏常驻」是同一套 DOM，不复制第二份目录。
+   */
+  function setNavOpen(open: boolean): void {
+    root.classList.toggle('nav-open', open);
+    navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  navToggle.addEventListener('click', () => setNavOpen(!root.classList.contains('nav-open')));
+  navClose.addEventListener('click', () => setNavOpen(false));
+  navBackdrop.addEventListener('click', () => setNavOpen(false));
 
   /** 各任务的子 tab 导航（`Tab.mount` 时登记进来，见 `SubsApi`） */
   const subsOf = new Map<string, SubsApi>();
@@ -1931,6 +1997,9 @@ export function mount(root: HTMLElement): void {
             // （作者 2026-10-08 报的「点击另一个主任务的子任务，无法跳转」）。
             if (tab.id !== activeTab) selectTab(tab.id, true);
             api.select(i);
+            // 窄屏的抽屉里点完就收起来（同一个任务的子项不会走 `selectTab`，
+            // 所以这里也要收一次，否则抽屉一直盖着图表）
+            setNavOpen(false);
           });
           list.append(sub);
         });
@@ -1958,6 +2027,8 @@ export function mount(root: HTMLElement): void {
 
     renderTree();
     tooltip.hide();
+    // 在抽屉里点了任务（或子任务）就把抽屉收起来 —— 窄屏上它盖着图表
+    setNavOpen(false);
     staleTabs.delete(tab.id);
     tab.syncControls?.();
     tab.update?.();

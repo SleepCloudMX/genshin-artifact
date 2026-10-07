@@ -92,8 +92,20 @@ html, body {
    留 12px 只是为了不让圆角高亮和面板边框真的顶到窗口边缘。 */
 #app { max-width: none; margin: 0; padding: 22px 12px 72px; }
 
-/* ---------- 头部 ---------- */
-.hero { margin-bottom: 20px; }
+/* ---------- 头部（**置顶**） ---------- */
+/* 作者 2026-10-08：「标题、GitHub、浅色/深色，这三个，置顶」——
+   于是它是一条 sticky 的横条，下面那道细线就是它的下边框：内容从下面滚过去，
+   线自然就出来了（一举两得）。负外边距 + 同值内边距是为了让底色铺满窗口宽，
+   否则 `#app` 那 12px 内边距会让内容从两侧露出来。 */
+.hero {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 -12px 20px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
 .title-row {
   display: flex;
   align-items: center;
@@ -103,6 +115,10 @@ html, body {
 /* 站点名：**从属信息**，比任务名小（作者 2026-10-07：主任务名放左上角并改大，
    这一行则改小一点）。原来 26px 比正文里任何东西都大，抢视线。 */
 .hero h1 { margin: 0; font-size: 16px; letter-spacing: .2px; }
+
+/* 「目录」按钮：只在窄屏出现（宽屏目录常驻），摆在标题左侧 */
+.nav-toggle { display: none; }
+.nav-backdrop { display: none; }
 
 /* 标题行右侧的图标组（源码链接 + 主题切换）。靠右对齐靠这一层，不是靠单个按钮 */
 .title-actions {
@@ -133,6 +149,29 @@ a.icon-btn { text-decoration: none; }
 .icon-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-soft); }
 .icon-btn svg { display: block; }
 
+/* 「目录」按钮与图标按钮同形（只在窄屏出现，见下面的断点） */
+.nav-toggle {
+  appearance: none;
+  flex: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.nav-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-soft); }
+.nav-toggle svg { display: block; }
+/* 抽屉里那一行（窄屏才显示）与遮罩 */
+.nav-head { display: none; }
+.nav-backdrop { display: none; }
+
 /* ---------- 布局 ---------- */
 .layout {
   display: grid;
@@ -153,11 +192,71 @@ a.icon-btn { text-decoration: none; }
 .config-col .slot-row.three-col { grid-template-columns: minmax(0, 1fr) 118px 26px; }
 .config-col .slot-head.two-col,
 .config-col .slot-row.two-col { grid-template-columns: minmax(0, 1fr) 118px; }
+/* 窄屏（≤1180px）：三栏收成一栏，**目录变成抽屉** ——
+   作者 2026-10-08：「半屏时没有目录，而是在顶上列 “得分分布、胚子质量、基础概率”，
+   删了这个吧，然后在 “圣遗物词条概率分布” 左侧加个按钮展开目录」。
+   所以这里不再把任务树横排（那排名字已经删了），而是固定到左侧滑出：
+   与宽屏是**同一份 DOM**，不复制第二份目录；点子项或遮罩就收起来。 */
 @media (max-width: 1180px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
+  .nav-toggle { display: inline-flex; }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 30;
+    width: 264px;
+    max-width: 84vw;
+    overflow-y: auto;
+    padding: 14px 14px 24px;
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border-strong);
+    box-shadow: var(--shadow);
+    transform: translateX(-102%);
+    transition: transform .18s ease;
+  }
+  #app.nav-open .sidebar { transform: none; }
+  .nav-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-head-title { font-size: 13px; font-weight: 650; color: var(--text); }
+  .nav-close {
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-dim);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .nav-close:hover { background: var(--bg-soft); color: var(--text); }
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgb(0 0 0 / .34);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease;
+  }
+  #app.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
 }
+/* 配置面板在长页面里跟着滚（作者 2026-10-07 的版式）。
+   `top` 要让过**置顶的标题条**（55px）+ 一点缝，否则它滑到标题底下就被盖住了。 */
 @media (min-width: 1181px) {
-  .sticky { position: sticky; top: 16px; }
+  .sticky { position: sticky; top: 71px; }
 }
 /* 结果栏是弹性列：子 tab 面板可以撑开，图就不必挤在顶部留一大片空白 */
 .results { display: flex; flex-direction: column; }
@@ -439,10 +538,8 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 .tree-sub.on { color: var(--accent); font-weight: 600; }
 /* 窄屏：三栏收成一栏，任务树变成一行横条 —— 子任务交给图表上方那一排选，
    所以这里把侧边栏里的子任务列表藏掉（同一份状态，两个入口留一个就够）。 */
-@media (max-width: 1180px) {
-  .sidebar .tree { flex-direction: row; flex-wrap: wrap; }
-  .sidebar .tree-subs { display: none; }
-}
+/* 窄屏不再把任务树横排成一行名字（作者 2026-10-08 让删的那排），
+   目录由标题左侧的按钮抽成抽屉 —— 规则在上面的 1180px 断点里。 */
 
 /* 中间那一栏顶上的标题：写着当前任务的**名字**（「得分分布」/「胚子质量」/「基础概率」）。
    靠左（作者 2026-10-07：放在左上角，不要中上方），比站点名大 —— 它才是这一页的标题；
