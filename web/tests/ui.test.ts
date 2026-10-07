@@ -456,7 +456,7 @@ describe('主 tab 与子 tab', () => {
     expect(rows).toHaveLength(GROWTH_ORDER.length);
     expect(GROWTH_ORDER).toHaveLength(10);
     expect(rows.map((r) => r.querySelector('td')!.textContent)).toEqual([...GROWTH_ORDER]);
-    // 表头 + 数值都是真实成长值（两位小数），不是取整后的显示值
+    // 表头 + 数值都取表里的两位小数，不是游戏内显示的一位小数
     const head = [...visibleSubPanel(root).querySelectorAll('#growthsTable th')].map(
       (n) => n.textContent,
     );
@@ -471,6 +471,12 @@ describe('主 tab 与子 tab', () => {
     ]);
     // 一条不计分的词条也照样列出来
     expect(rows.map((r) => r.querySelector('td')!.textContent)).toContain('小防御');
+
+    // 口径措辞有讲究：**不能说成「游戏内部值」** —— 那两个小数本身就是四舍五入的结果，
+    // 游戏内的精确值我们不知道（作者纠过一次，别再写回去）
+    const hint = visibleSubPanel(root).querySelector('.hint')!.textContent!;
+    expect(hint).toContain('不是游戏内的精确值');
+    expect(hint).not.toContain('内部值');
   });
 
   it('每张图在自己的子 tab 里，切过去才渲染', () => {

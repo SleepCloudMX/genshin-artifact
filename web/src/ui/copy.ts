@@ -125,12 +125,16 @@ export const DROP_OUT_OF_RANGE = '该部位没有这个主词条';
 
 export const GROWTH_TABLE_TITLE = '成长值';
 /**
- * 两句话都必须留：第一句交代**我们用的是哪个精度的值**（游戏内部值，两位小数，
- * 不是游戏内显示的那位），第二句交代**为什么总分仍可能差 0.1**（显示精度）。
- * 不要写成「已四舍五入」—— 那会把游戏的显示精度说成是我们主动砍的。
+ * 成长值的口径。**不要说成「游戏内部值」**：那两个小数本身就是四舍五入的结果，
+ * 游戏内的精确值我们不知道。也不要写「已四舍五入」这类主动语态 ——
+ * 那会把「我们只有这个精度」说成「我们砍了精度」。
+ *
+ * 左栏小表窄，只放第一句；「成长值」子 tab 有位置，把总分差 0.1 也交代清楚。
  */
-export const GROWTHS_HINT = '成长值是游戏内部值（两位小数）。游戏内只显示到一位小数，故总分可能差 0.1。';
-export const SUB_GROWTHS_HINT = `全部副词条的成长值，得分 = Σ(成长值 × 权重)。${GROWTHS_HINT}`;
+export const GROWTHS_HINT = '成长值四舍五入到两位小数，不是游戏内的精确值。';
+export const SUB_GROWTHS_HINT =
+  `全部副词条的成长值，得分 = Σ(成长值 × 权重)。${GROWTHS_HINT}` +
+  '游戏内只显示到一位小数，故总分可能有 0.1 的出入。';
 export const TH_GROWTH_ATTR = '词条';
 export const TH_GROWTH_TIERS = ['一档', '二档', '三档', '四档'] as const;
 export const GROWTH_TABLE_EMPTY = '还没有计分词条。';
