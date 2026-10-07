@@ -1201,6 +1201,8 @@ describe('页面文案', () => {
     expect(title()).toBe(C.TAB_BASIC);
     // 每个面板各有一条，不是共用的一个标题被搬来搬去
     expect(root.querySelectorAll('.tab-title')).toHaveLength(3);
+    // 站点名（h1）与任务名是两个不同的东西，两个都在
+    expect(root.querySelector('.hero h1')!.textContent).toBe(C.APP_TITLE);
   });
 
   it('标题下那句「计算胚子练满 +20 …」和两页的说明句都删了', () => {

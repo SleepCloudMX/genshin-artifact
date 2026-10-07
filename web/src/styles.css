@@ -81,7 +81,9 @@ html, body {
   gap: 12px;
   flex-wrap: wrap;
 }
-.hero h1 { margin: 0; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: .2px; }
+/* 站点名：**从属信息**，比任务名小（作者 2026-10-07：主任务名放左上角并改大，
+   这一行则改小一点）。原来 26px 比正文里任何东西都大，抢视线。 */
+.hero h1 { margin: 0; font-size: 16px; letter-spacing: .2px; }
 
 /* 标题行右侧的图标组（源码链接 + 主题切换）。靠右对齐靠这一层，不是靠单个按钮 */
 .title-actions {
@@ -417,13 +419,13 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
   .sidebar .tree-subs { display: none; }
 }
 
-/* 中间那一栏顶上的小标题：写着当前任务的**名字**（「得分分布」/「胚子质量」）。
-   居中对齐，与下面那排子 tab、图表形成一条竖轴线；窄屏侧边栏收成横条时，
-   它就是唯一的位置提示。 */
+/* 中间那一栏顶上的标题：写着当前任务的**名字**（「得分分布」/「胚子质量」/「基础概率」）。
+   靠左（作者 2026-10-07：放在左上角，不要中上方），比站点名大 —— 它才是这一页的标题；
+   窄屏侧边栏收成横条时，它也是唯一的位置提示。 */
 .tab-title {
-  margin: 0 0 14px;
-  text-align: center;
-  font-size: 15px;
+  margin: 0 0 12px;
+  text-align: left;
+  font-size: 19px;
   font-weight: 650;
   letter-spacing: .3px;
   color: var(--text);
