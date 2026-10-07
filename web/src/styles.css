@@ -88,21 +88,28 @@ html, body {
 }
 
 /* 整页**贴着窗口两边**（作者 2026-10-07：左目录靠左、右配置靠右，宽度让给中间的图）。
-   早先是 `max-width: 1400px` 居中 + 22px 内边距，宽屏上左右各白扔一大条；
-   留 12px 只是为了不让圆角高亮和面板边框真的顶到窗口边缘。 */
-#app { max-width: none; margin: 0; padding: 22px 12px 72px; }
+   早先是 `max-width: 1400px` 居中 + 22px 内边距，宽屏上左右各白扔一大条。
+   **横向的内边距挪到 `.layout` 上**（原来是这里的 12px + 标题条的负外边距补偿）——
+   置顶的标题条要自己铺满窗口宽，用负外边距去补会在合成时被撑开（作者 2026-10-08
+   报的「置顶的在滚动时会拉长」）。 */
+#app { max-width: none; margin: 0; padding: 22px 0 72px; }
 
 /* ---------- 头部（**置顶**） ---------- */
 /* 作者 2026-10-08：「标题、GitHub、浅色/深色，这三个，置顶」——
    于是它是一条 sticky 的横条，下面那道细线就是它的下边框：内容从下面滚过去，
-   线自然就出来了（一举两得）。负外边距 + 同值内边距是为了让底色铺满窗口宽，
-   否则 `#app` 那 12px 内边距会让内容从两侧露出来。 */
+   线自然就出来了（一举两得）。
+
+   **它的高度必须是死的**：写成 flex + `min-height` + 不换行，宽度怎么变都不会变高；
+   高度一变，滚动时看着就像被「拉长」了。 */
 .hero {
   position: sticky;
   top: 0;
   z-index: 20;
-  margin: 0 -12px 20px;
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  min-height: 55px;
+  margin: 0 0 20px;
+  padding: 0 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
@@ -110,11 +117,21 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 /* 站点名：**从属信息**，比任务名小（作者 2026-10-07：主任务名放左上角并改大，
-   这一行则改小一点）。原来 26px 比正文里任何东西都大，抢视线。 */
-.hero h1 { margin: 0; font-size: 16px; letter-spacing: .2px; }
+   这一行则改小一点）。原来 26px 比正文里任何东西都大，抢视线。
+   窄到放不下时省略号，**不许换行**（会把标题条撑高）。 */
+.hero h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: .2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 「目录」按钮：只在窄屏出现（宽屏目录常驻），摆在标题左侧 */
 .nav-toggle { display: none; }
@@ -175,6 +192,8 @@ a.icon-btn { text-decoration: none; }
 /* ---------- 布局 ---------- */
 .layout {
   display: grid;
+  /* 两侧的 12px 在这里（原来是 `#app` 的内边距）—— 置顶的标题条要自己铺满窗口宽 */
+  padding: 0 12px;
   /* 左：任务树；中：图表；右：**这个任务的**配置。
      右栏给足 400px（「词条 / 权重 / 初始档位」三列要放得下），不够宽时在
      1180px 断点整体收成一栏。
