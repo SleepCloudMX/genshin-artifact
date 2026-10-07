@@ -184,6 +184,28 @@ export function weightOnSelect(attr: SubAttr | ''): number {
 }
 
 /**
+ * 「胚子质量」表里选中某词条时的权重初值。
+ *
+ * 与 `weightOnSelect` 同一套规则（有默认口径就用默认，否则 1），只是换用
+ * `QUALITY_WEIGHT` 这张表 —— 表里的行**总是**权重 > 0 的（0 的行不显示），
+ * 所以这个初值只在「把某一行换成另一条词条」时用得上。
+ */
+export function qualityWeightOnSelect(attr: SubAttr): number {
+  return stepStart(QUALITY_WEIGHT[attr]);
+}
+
+/**
+ * 「胚子质量」表要显示的行：权重 > 0 的词条，按 `SUB_ATTRS` 顺序。
+ *
+ * 权重 0 的词条不进表（作者要求：0 的行不显示，要加就用「+ 添加词条」）。
+ * 顺序固定成 `SUB_ATTRS` 序，与 URL 编码、与「词条概率」子 tab 的候选集一致 ——
+ * 换一条词条时行会换位置，但永远不会出现「同一个配置两种排列」。
+ */
+export function qualityAttrsOf(weights: Partial<Record<SubAttr, number>>): SubAttr[] {
+  return SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0);
+}
+
+/**
  * 默认配置（所有任务共用的那半）。
  *
  * - 部位 `杯` + 主词条 `火伤`：火伤不在副词条池里，**副词条可选集是完整的**——
@@ -405,7 +427,11 @@ export function fromQuery(search: string): AppState {
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
     const bucket = Number(p.get('bucket'));
-    const quality = decodeQuality(p.get('qw'), { weights: fallback.weights });
+    const weights = { ...decodeQuality(p.get('qw'), { weights: fallback.weights }).weights };
+    // 副词条不能与主词条重复（`爆伤` / `暴伤` 这种别名也算同一条）：链接可能是
+    // 手改的或旧的，在入口就剔掉 —— 与 `core/quality.ts` 的 `qualityAttrs` 同一口径。
+    const conflict = excludedSubstat(mainAttr);
+    if (conflict) delete weights[conflict];
     return {
       slot,
       mainAttr,
@@ -413,7 +439,7 @@ export function fromQuery(search: string): AppState {
       initialVisible: iv === 3 || iv === 4 ? iv : fallback.initialVisible,
       targetScore: Number.isFinite(target) && target >= 0 ? target : fallback.targetScore,
       bucketSize: isBucketSize(bucket) ? bucket : fallback.bucketSize,
-      weights: quality.weights,
+      weights,
       theme: p.get('theme') === 'dark' ? 'dark' : 'light',
     };
   } catch {

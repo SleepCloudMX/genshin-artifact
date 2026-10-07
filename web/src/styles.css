@@ -225,8 +225,10 @@ select:focus-visible, input:focus-visible, button:focus-visible {
 .slot-head > span:nth-child(2),
 .slot-head > span:nth-child(3) { text-align: center; }
 .slot-row { margin-bottom: 6px; }
-/* 「胚子质量」的权重表：词条名是固定文本（条数不限，所以没有下拉） */
-.slot-name { font-size: 13px; padding-left: 2px; }
+/* 「+ 添加词条」：表格下方左对齐的小按钮（词条加进来才有行，所以入口在表尾） */
+button.ghost.add-row { margin-top: 2px; }
+button.ghost.add-row:disabled { opacity: .45; cursor: not-allowed; border-color: var(--border-strong); }
+button.ghost.add-row:disabled:hover { background: var(--bg-elev); }
 
 /* 权重：− [数字] +。原生 number 的上下箭头又小又难按，而这一列几乎只做小幅微调 */
 .stepper {

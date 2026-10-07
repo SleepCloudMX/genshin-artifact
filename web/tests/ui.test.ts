@@ -145,6 +145,28 @@ function qualityWeightInput(root: HTMLElement, attr: string): HTMLInputElement |
   return root.querySelector<HTMLInputElement>(`#qualityRows input[data-attr="${attr}"]`);
 }
 
+/** 「胚子质量」的权重表：某个词条那一行的下拉 / 权重框 / 两个步进按钮 */
+function qualityRow(
+  root: HTMLElement,
+  attr: string,
+): {
+  sel: HTMLSelectElement;
+  input: HTMLInputElement;
+  minus: HTMLButtonElement;
+  plus: HTMLButtonElement;
+} {
+  const row = [...root.querySelectorAll<HTMLElement>('#qualityRows .slot-row')].find(
+    (r) => r.querySelector<HTMLSelectElement>('select[data-key="qattr"]')!.value === attr,
+  )!;
+  const steps = [...row.querySelectorAll<HTMLButtonElement>('.step')];
+  return {
+    sel: row.querySelector<HTMLSelectElement>('select[data-key="qattr"]')!,
+    input: row.querySelector<HTMLInputElement>('input[data-key="qweight"]')!,
+    minus: steps[0]!,
+    plus: steps[1]!,
+  };
+}
+
 /** 从界面上读回「胚子质量」的权重表（只含 > 0 的条目） */
 function qualityWeights(root: HTMLElement): Record<string, number> {
   const out: Record<string, number> = {};
@@ -650,62 +672,79 @@ describe('主 tab 与子 tab', () => {
     expect(pie.textContent).not.toContain('分');
   });
 
-  it('胚子质量的权重表：10 条词条全列出，条数不限、没有下拉', () => {
+  it('胚子质量的权重表：只列正在计分的词条（0 的行不显示），每行带词条下拉', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
     const rows = [...root.querySelectorAll('#qualityRows .slot-row')];
-    expect(rows).toHaveLength(10);
-    expect(rows.map((r) => r.querySelector('.slot-name')!.textContent)).toEqual([...SUB_ATTRS]);
-    // 没有词条下拉、也没有「初始档位」列：这一页不看档位
-    expect(root.querySelector('#qualityRows select')).toBeNull();
+    expect(rows).toHaveLength(4);
+    // 行序 = SUB_ATTRS 顺序（大攻击 在 暴击 前面），与 URL 编码、与词条概率表一致
+    expect(
+      rows.map((r) => r.querySelector<HTMLSelectElement>('select[data-key="qattr"]')!.value),
+    ).toEqual(['大攻击', '暴击', '暴伤', '精通']);
+    // 0 的行不再列出来（旧版固定 10 行）
+    expect(root.querySelector('#qualityRows .slot-row')!.textContent).not.toContain('0');
+    // 没有「初始档位」列：这一页不看档位
+    expect(root.querySelector('#qualityRows select[data-key="roll"]')).toBeNull();
     expect(root.querySelector('#slotRows')).toBeNull();
   });
 
-  it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {
+  it('加号添加词条：取剩下的第一条，权重按默认口径给初值', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
-    // 有效词条卡片按这张表算
-    expect(cardValues(root)[0]).toBe('4 条');
+    const add = root.querySelector<HTMLButtonElement>('#addQualityAttr')!;
+    expect(add.textContent).toBe(C.ADD_ATTR);
+    add.click();
+    // 小生命没有默认口径 → 落到 1；加进来的行排在 SUB_ATTRS 的最前面
+    expect(qualityWeights(root)).toEqual({ 小生命: 1, 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
+    expect([...root.querySelectorAll('#qualityRows .slot-row')]).toHaveLength(5);
   });
 
-  it('胚子质量的权重与「得分分布」互不影响，且不乘成长值', () => {
+  it('权重归零那一行就消失（作者要求 0 的行不显示）', () => {
     const root = freshRoot();
     mount(root);
-    const growthBestBefore = cardValues(root)[3]!;
-
     clickTab(root, 'quality');
-    const crit = qualityWeightInput(root, '暴击')!;
-    setWeight(crit, '5'); // 3 → 5（超出 4 条上限也没关系，这一页条数不限）
-    expect(qualityWeights(root)['暴击']).toBe(5);
-    // 期望得分 = Σ 权重 × 出现概率，量纲就是「分」，不乘成长值
-    expect(Number(cardValues(root)[2])).toBeGreaterThan(0);
-
-    clickTab(root, 'growth');
-    expect(cardValues(root)[3]).toBe(growthBestBefore); // 得分分布没被动过
+    // 手填 0
+    setWeight(qualityWeightInput(root, '精通')!, '0');
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 大攻击: 2 });
+    // − 从默认口径直接归零（与槽位表同一套规则）
+    qualityRow(root, '暴击').minus.click();
+    expect(qualityWeights(root)).toEqual({ 暴伤: 3, 大攻击: 2 });
   });
 
-  it('两个 tab 共用部位与主词条', () => {
+  it('下拉里选别的词条：换过去并按默认口径取初值；选「不计分」= 撤掉这一行', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    setSelect(qualityRow(root, '大攻击').sel, '充能');
+    // 充能没有默认口径 → 1；大攻击那一行没了
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 充能: 1 });
+
+    setSelect(qualityRow(root, '充能').sel, '');
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2 });
+  });
+
+  it('副词条不能与主词条重复：表里已有的词条在下拉里灰掉', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const opts = [...qualityRow(root, '大攻击').sel.options];
+    const taken = opts.find((o) => o.value === '暴击')!;
+    expect(taken.disabled).toBe(true);
+    // 自己那一项当然可选
+    expect(opts.find((o) => o.value === '大攻击')!.disabled).toBe(false);
+  });
+
+  it('主词条换成暴击后，暴击那一行从表里消失、下拉里也不再提供它', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
     pickSlotAndMain(root, '头', '暴击');
-    clickTab(root, 'growth');
-    expect(root.querySelector<HTMLSelectElement>('#slot')!.value).toBe('头');
-    expect(root.querySelector<HTMLSelectElement>('#mainAttr')!.value).toBe('暴击');
-    expect(attrSelects(root).map((s) => s.value)).not.toContain('暴击');
-  });
-
-  it('部位与主词条在同一行（胚子质量页）', () => {
-    const root = freshRoot();
-    mount(root);
-    clickTab(root, 'quality');
-    const pair = root.querySelector('#form .field-pair')!;
-    expect(pair.children).toHaveLength(2);
-    expect(pair.querySelector('#slot')).not.toBeNull();
-    expect(pair.querySelector('#mainAttr')).not.toBeNull();
+    expect(qualityWeights(root)['暴击']).toBeUndefined();
+    for (const sel of root.querySelectorAll<HTMLSelectElement>('#qualityRows select[data-key="qattr"]')) {
+      expect([...sel.options].map((o) => o.value)).not.toContain('暴击');
+    }
   });
 
   it('质量分布：勾选框只写词条名，右上角标出「同时含这几条」的概率', () => {
@@ -756,6 +795,52 @@ describe('主 tab 与子 tab', () => {
     expect(chart.querySelectorAll('text.cum-label')).toHaveLength(0);
     // 柱子还在
     expect(chart.querySelectorAll('rect.bar-seg').length).toBeGreaterThan(0);
+  });
+
+  it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
+    // 有效词条卡片按这张表算
+    expect(cardValues(root)[0]).toBe('4 条');
+  });
+
+  it('胚子质量的权重与「得分分布」互不影响，且不乘成长值', () => {
+    const root = freshRoot();
+    mount(root);
+    const growthBestBefore = cardValues(root)[3]!;
+
+    clickTab(root, 'quality');
+    const crit = qualityWeightInput(root, '暴击')!;
+    setWeight(crit, '5'); // 3 → 5（超出 4 条上限也没关系，这一页条数不限）
+    expect(qualityWeights(root)['暴击']).toBe(5);
+    // 期望得分 = Σ 权重 × 出现概率，量纲就是「分」，不乘成长值
+    expect(Number(cardValues(root)[2])).toBeGreaterThan(0);
+
+    clickTab(root, 'growth');
+    expect(cardValues(root)[3]).toBe(growthBestBefore); // 得分分布没被动过
+  });
+
+  it('两个 tab 共用部位与主词条', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    pickSlotAndMain(root, '头', '暴击');
+    clickTab(root, 'growth');
+    expect(root.querySelector<HTMLSelectElement>('#slot')!.value).toBe('头');
+    expect(root.querySelector<HTMLSelectElement>('#mainAttr')!.value).toBe('暴击');
+    expect(attrSelects(root).map((s) => s.value)).not.toContain('暴击');
+  });
+
+  it('部位与主词条在同一行（胚子质量页）', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const pair = root.querySelector('#form .field-pair')!;
+    expect(pair.children).toHaveLength(2);
+    expect(pair.querySelector('#slot')).not.toBeNull();
+    expect(pair.querySelector('#mainAttr')).not.toBeNull();
   });
 });
 
@@ -856,6 +941,20 @@ describe('页面文案', () => {
     const head = root.querySelector('#config .panel-head')!;
     expect(head.querySelector('h2')!.textContent).toBe(C.CONFIG);
     expect(head.querySelector('#resetBtn')).not.toBeNull();
+  });
+
+  it('「重置」把两页的配置都还原（包括胚子质量的权重表）', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    setWeight(qualityWeightInput(root, '暴击')!, '9');
+    root.querySelector<HTMLButtonElement>('#addQualityAttr')!.click();
+    expect(qualityWeights(root)['暴击']).toBe(9);
+    expect(Object.keys(qualityWeights(root))).toHaveLength(5);
+
+    root.querySelector<HTMLButtonElement>('#resetBtn')!.click();
+    // 回到默认口径：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2，多出来的那条没了
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
   });
 
   it('主题按钮是图标，文字只在 title / aria-label 里', () => {

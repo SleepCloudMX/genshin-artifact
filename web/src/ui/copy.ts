@@ -47,12 +47,22 @@ export const SUBSTATS_HINT_ROLL =
  *
  * 这一页与「得分分布」的差别是**条数不限**：那边是 4 个槽位（胚子终态就是 4 条），
  * 这边只统计「这些词条长在胚子上的情况」。权重就是分数，**不乘成长值**。
+ *
+ * 表格只列**已经在用的**词条（权重 0 的行不显示），所以要交代怎么加、怎么删 ——
+ * 这两件事都不是自明的（加在下面的按钮上，删在 `−` 归零上）。
  */
-export const QUALITY_WEIGHTS_HINT = '权重即得分，不乘成长值；条数不限，0 为不计分。';
+export const QUALITY_WEIGHTS_HINT =
+  '权重即得分，不乘成长值；条数不限，权重归零即从表里移除。';
+export const ADD_ATTR = '+ 添加词条';
+export const ADD_ATTR_TITLE = '再加一条计分词条';
+export const ADD_ATTR_NONE = '副词条已全部列出';
 
 export const COL_ATTR = '词条';
 export const COL_WEIGHT = '权重';
 export const COL_ROLL = '初始档位';
+
+/** 词条下拉里的空选项：这个词条位置不计分 */
+export const NOT_SCORED = '（不计分）';
 
 export const ROLL_RANDOM = '随机';
 export function rollFixed(tier: number): string {
@@ -191,18 +201,17 @@ export function topPercent(alpha: number): string {
 }
 
 /**
- * 质量分布（堆叠柱 + 累计概率）。
+ * 柱内按组合拆开的那张图。
  *
  * 要交代三件图上读不出来的事：
- *   1. 这一页与「得分分布」的口径差别（只看掉落那一刻，不含强化）；
- *   2. **段色只在一根柱子内有意义**（这正是它与参考实现的差别所在）；
- *   3. 红线是累计概率，读右轴。
+ *   1. **段色只在一根柱子内有意义**（这正是它与参考实现的差别所在）；
+ *   2. 红线是累计概率，读右轴；
+ *   3. 勾选框是「同时含这几条」而不是「含其中任意一条」。
  */
 export const QUALITY_DIST_HINT =
-  '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，颜色只区分同一根柱子' +
-  '里的段；红线为累计概率（右轴）。';
+  '仅统计掉落瞬间的 4 个副词条，不含强化成长。柱内按组合拆开，颜色只区分同一根柱子里' +
+  '的段；红线为累计概率（右轴）。';
 export const COMBOS_HINT = '得分最高的那一项已摘出并固定在左上角；概率过小的长尾合并为「其他」。';
-/** 勾选框的口径：勾多条是「同时含」而不是「含其中任意一条」 */
 export const QUALITY_PICK_HINT = '勾选 = 同时含这几条';
 /** 画不画累计概率曲线的勾选框 */
 export const CUM_SERIES = '累计概率';
