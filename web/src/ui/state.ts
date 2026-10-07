@@ -38,25 +38,28 @@ export interface SlotInput {
 export type Slots = [SlotInput, SlotInput, SlotInput, SlotInput];
 
 /**
- * 配置分成两半，因为**不同任务需要的配置不同**：
+ * 配置分成三块，因为**不同任务需要的配置不同**：
  *
- * - `SharedConfig`：所有任务都要的（主词条、哪些副词条计分、配色）。
- *   它定义「评分标准」，换任务不该丢。
- * - `GrowthConfig`：**只属于「得分分布」这个任务**的（初始词条数、目标分数）。
- *   「胚子质量」只关心掉落那一刻，问它「掉落时可见几条」没有意义；
- *   以后的热力图任务同理。
+ * - `SharedConfig`：所有任务都要的（部位、主词条、配色）。
+ * - `GrowthConfig`：**只属于「得分分布」**的（4 个槽位、初始词条数、目标分数、分桶）。
+ * - `QualityConfig`：**只属于「胚子质量」**的（每条副词条的评分权重）。
  *
- * 加新任务时先问一句：这个配置是「评分标准」还是「这个任务特有的输入」？
+ * 加新任务时先问一句：这个配置是「所有任务都要的」还是「这个任务特有的输入」？
  */
 export interface SharedConfig {
   /** 刷的是哪个部位。它决定主词条的可选项，也决定主词条概率 */
   slot: ArtifactSlot;
   mainAttr: MainAttr;
-  slots: Slots;
   theme: 'light' | 'dark';
 }
 
 export interface GrowthConfig {
+  /**
+   * 4 个副词条槽位。**只有「得分分布」需要它**：
+   * 那个模型里胚子终态就是 4 条副词条，槽位顺序还有语义（见 `core/growth.ts`），
+   * 所以必须是定长 4 个、每个槽位带「初始档位」。
+   */
+  slots: Slots;
   /** 掉落时可见几个副词条 */
   initialVisible: InitialVisible;
   /** 目标分数（用于「要刷多少个」） */
@@ -71,7 +74,22 @@ export interface GrowthConfig {
   bucketSize: number;
 }
 
-export interface AppState extends SharedConfig, GrowthConfig {}
+/**
+ * 「胚子质量」的评分标准：**每条副词条一个权重，条数不限**。
+ *
+ * 与「得分分布」的 4 个槽位是两件事：
+ *   - 那边必须有 4 个槽位（胚子终态就是 4 条副词条），槽位顺序还有语义；
+ *   - 这边只回答「这条词条长在胚子上算几分」，只关心 1 条可以、关心 10 条也可以。
+ *
+ * 权重是**分**，**不乘成长值** —— 胚子质量看的是掉落那一刻拥有哪些词条，
+ * 与强化无关（见 `core/quality.ts`）。
+ */
+export interface QualityConfig {
+  /** 词条 → 权重；`> 0` 即有效词条。没列出的词条视为 0 */
+  weights: Partial<Record<SubAttr, number>>;
+}
+
+export interface AppState extends SharedConfig, GrowthConfig, QualityConfig {}
 
 /** 槽位的固定填充顺序，决定「哪条占第 1 个槽位」——影响 3 词条胚子的建模 */
 export const SLOT_ORDER: readonly SubAttr[] = SUB_ATTRS;
@@ -99,14 +117,26 @@ export const CANONICAL_WEIGHT: Record<SubAttr, number> = {
 export const WEIGHT_STEP = 0.1;
 
 /**
+ * 「胚子质量」的默认评分口径：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2。
+ *
+ * 与 `CANONICAL_WEIGHT` 是**两套**：那边是「得分分布」的成长权重（暴击 2 / 暴伤 1，
+ * 表示一条暴击的收益约等于两条暴伤），这边是胚子质量的**分数**，
+ * 口径来自 `docs/ai-ref/v1/init_stats.py` 的示例配置。**两边不要互相套用。**
+ */
+export const QUALITY_WEIGHT: Record<SubAttr, number> = {
+  小生命: 0, 小攻击: 0, 小防御: 0,
+  大生命: 0, 大防御: 0, 大攻击: 2,
+  暴击: 3, 暴伤: 3, 充能: 0, 精通: 2,
+};
+
+/**
  * 从 0 起步时 `+` 落到哪里。
  *
- * 有默认权重的词条落到默认值（暴击一次到 2）；其余词条落到 1 ——
+ * 有默认权重的词条落到默认值（暴击一次到 3）；其余词条落到 1 ——
  * 它们是「临时想给点分」才加上的，用 1 当起点比 0.1 合理得多。
  */
-export function stepStart(attr: SubAttr | ''): number {
-  if (attr === '') return WEIGHT_STEP;
-  return CANONICAL_WEIGHT[attr] || 1;
+export function stepStart(canonical: number): number {
+  return canonical > 0 ? canonical : 1;
 }
 
 /** 浮点加减后归整到两位小数，避免 `0.1` 反复累加攒出 `0.30000000000000004` */
@@ -127,61 +157,75 @@ export function quantizeWeight(w: number): number {
 }
 
 /**
- * `+` 的下一档：当前为 0 时直接落到 `stepStart`（暴击一次到 2），
- * 否则按步长递加。这样「加一个词条」是一次点击，而不是点二十下。
+ * `+` 的下一档：当前为 0 时直接落到 `canonical`（暴击一次到 3），否则按步长递加。
+ * 这样「加一个词条」是一次点击，而不是点二十下。
+ *
+ * `canonical` 由调用方给：两张权重表（成长 / 胚子质量）各有各的默认口径。
  */
-export function nextWeightUp(attr: SubAttr | '', weight: number): number {
-  if (!(weight > 0)) return stepStart(attr);
+export function nextWeightUp(weight: number, canonical: number): number {
+  if (!(weight > 0)) return stepStart(canonical);
   return round2(weight + WEIGHT_STEP);
 }
 
 /**
- * `−` 的下一档：正好停在默认权重时直接归零（暴击 2 → 0），否则按步长递减。
+ * `−` 的下一档：正好停在默认权重时直接归零（暴击 3 → 0），否则按步长递减。
  * 归零这一下是刻意的——默认权重往往是最常用的口径，再往下按通常就是「不要它了」。
  */
-export function nextWeightDown(attr: SubAttr | '', weight: number): number {
+export function nextWeightDown(weight: number, canonical: number): number {
   if (!(weight > 0)) return 0;
-  const base = attr === '' ? 0 : CANONICAL_WEIGHT[attr];
-  if (base > 0 && Math.abs(weight - base) < 1e-9) return 0;
+  if (canonical > 0 && Math.abs(weight - canonical) < 1e-9) return 0;
   return Math.max(0, round2(weight - WEIGHT_STEP));
 }
 
-/** 选中某词条时的权重初值：有默认口径就用它，否则用 `stepStart`（1） */
+/** 选中某词条时的权重初值：有默认口径就用它，否则用 1 */
 export function weightOnSelect(attr: SubAttr | ''): number {
   if (attr === '') return 0;
   return CANONICAL_WEIGHT[attr] || 1;
 }
 
 /**
- * 默认配置。
+ * 默认配置（所有任务共用的那半）。
  *
- * - 主词条 `火伤`：它不在副词条池里，**副词条可选集是完整的**——
+ * - 部位 `杯` + 主词条 `火伤`：火伤不在副词条池里，**副词条可选集是完整的**——
  *   用 `大攻击` 之类的当默认值会白白少一个选项，让人以为漏了东西。
- * - 副词条只有 `暴击 2` / `暴伤 1`，后两行留空。摆着权重 0 的词条会让
- *   「计分槽位 2/4」和看起来有 4 条的表格自相矛盾。
  */
 export function defaultShared(): SharedConfig {
+  return { slot: '杯', mainAttr: '火伤', theme: 'light' };
+}
+
+/**
+ * 「得分分布」的默认输入。
+ *
+ * 副词条只有 `暴击 2` / `暴伤 1`（社区常用的双暴 2:1），后两个槽位留空。
+ * 摆着权重 0 的词条会让「计分槽位 2/4」和看起来有 4 条的表格自相矛盾。
+ */
+export function defaultGrowth(): GrowthConfig {
   return {
-    slot: '杯',
-    mainAttr: '火伤',
     slots: [
       { attr: '暴击', weight: CANONICAL_WEIGHT['暴击'], initialRoll: 'random' },
       { attr: '暴伤', weight: CANONICAL_WEIGHT['暴伤'], initialRoll: 'random' },
       { attr: '', weight: 0, initialRoll: 'random' },
       { attr: '', weight: 0, initialRoll: 'random' },
     ],
-    theme: 'light',
+    // 分桶默认 0.2 分：0.1 在默认配置下有一百多根柱子，糊成一片
+    initialVisible: 4,
+    targetScore: 30,
+    bucketSize: 0.2,
   };
 }
 
-export function defaultGrowth(): GrowthConfig {
-  // 分桶默认 0.2 分：0.1 在默认配置下有一百多根柱子，糊成一片
-  return { initialVisible: 4, targetScore: 30, bucketSize: 0.2 };
+/** 「胚子质量」的默认输入：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2（其余 0） */
+export function defaultQuality(): QualityConfig {
+  const weights: Partial<Record<SubAttr, number>> = {};
+  for (const a of SUB_ATTRS) {
+    if (QUALITY_WEIGHT[a] > 0) weights[a] = QUALITY_WEIGHT[a];
+  }
+  return { weights };
 }
 
-/** 完整默认状态（两个 tab 的配置合起来） */
+/** 完整默认状态（三个 tab 的配置合起来） */
 export function defaultState(): AppState {
-  return { ...defaultShared(), ...defaultGrowth() };
+  return { ...defaultShared(), ...defaultGrowth(), ...defaultQuality() };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +300,8 @@ export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
   };
 }
 
-/** 当前的「词条 → 权重」映射，只含权重 > 0 的条目（胚子质量页要用） */
-export function weightMap(state: SharedConfig): Partial<Record<SubAttr, number>> {
+/** 「得分分布」的「词条 → 权重」映射：从 4 个槽位里取权重 > 0 的条目 */
+export function growthWeights(state: GrowthConfig): Partial<Record<SubAttr, number>> {
   const out: Partial<Record<SubAttr, number>> = {};
   for (const { attr, weight } of state.slots) {
     if (attr === '') continue;
@@ -277,6 +321,33 @@ function encodeSlot(s: SlotInput): string {
   return `${s.attr}:${quantizeWeight(s.weight)}:${s.initialRoll}`;
 }
 
+/**
+ * 胚子质量的权重表在 query 里的写法：`暴击:3,暴伤:3,精通:2`。
+ *
+ * 按 `SUB_ATTRS` 顺序输出，同一个配置永远得到同一个串（便于 diff 分享链接）。
+ * 权重 0 的词条不写；**空串是合法状态**（一条都不计分），与「没写过这个参数」不同。
+ */
+function encodeQuality(weights: Partial<Record<SubAttr, number>>): string {
+  return SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0)
+    .map((a) => `${a}:${quantizeWeight(weights[a]!)}`)
+    .join(',');
+}
+
+/** 解析胚子质量的权重表；`raw === null`（老链接没带这个参数）时用默认口径 */
+function decodeQuality(raw: string | null, fallback: QualityConfig): QualityConfig {
+  if (raw === null) return fallback;
+  const weights: Partial<Record<SubAttr, number>> = {};
+  for (const chunk of raw.split(',')) {
+    const [attr, w] = chunk.split(':');
+    if (!attr || !(SUB_ATTRS as readonly string[]).includes(attr)) continue;
+    const n = Number(w);
+    if (!Number.isFinite(n) || n < 0) continue;
+    const q = quantizeWeight(n);
+    if (q > 0) weights[attr as SubAttr] = q;
+  }
+  return { weights };
+}
+
 export function toQuery(state: AppState): string {
   const p = new URLSearchParams();
   p.set('slot', state.slot);
@@ -284,6 +355,7 @@ export function toQuery(state: AppState): string {
   p.set('iv', String(state.initialVisible));
   p.set('target', String(state.targetScore));
   p.set('slots', state.slots.map(encodeSlot).join(','));
+  p.set('qw', encodeQuality(state.weights));
   // 分桶一律写进链接（有默认值，不存在「没选过」的状态），分享出去是同一个视图
   p.set('bucket', String(state.bucketSize));
   if (state.theme === 'dark') p.set('theme', 'dark');
@@ -333,6 +405,7 @@ export function fromQuery(search: string): AppState {
     const iv = Number(p.get('iv'));
     const target = Number(p.get('target'));
     const bucket = Number(p.get('bucket'));
+    const quality = decodeQuality(p.get('qw'), { weights: fallback.weights });
     return {
       slot,
       mainAttr,
@@ -340,6 +413,7 @@ export function fromQuery(search: string): AppState {
       initialVisible: iv === 3 || iv === 4 ? iv : fallback.initialVisible,
       targetScore: Number.isFinite(target) && target >= 0 ? target : fallback.targetScore,
       bucketSize: isBucketSize(bucket) ? bucket : fallback.bucketSize,
+      weights: quality.weights,
       theme: p.get('theme') === 'dark' ? 'dark' : 'light',
     };
   } catch {

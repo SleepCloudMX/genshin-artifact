@@ -11,9 +11,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { mount } from '../src/ui/app';
 import * as C from '../src/ui/copy';
-import { GROWTH_ORDER } from '../src/core/stats';
+import { GROWTH_ORDER, SUB_ATTRS } from '../src/core/stats';
 import {
   CANONICAL_WEIGHT,
+  QUALITY_WEIGHT,
   defaultState,
   fromQuery,
   toQuery,
@@ -22,7 +23,7 @@ import {
   isExcludedByMain,
   nextWeightUp,
   nextWeightDown,
-  weightMap,
+  growthWeights,
 } from '../src/ui/state';
 
 function freshRoot(): HTMLElement {
@@ -137,6 +138,21 @@ function cardValues(root: HTMLElement): string[] {
   return [...root.querySelectorAll('.tab-panel:not([hidden]) .card-value')].map(
     (n) => n.textContent ?? '',
   );
+}
+
+/** 「胚子质量」的权重表：某个词条的权重输入框 */
+function qualityWeightInput(root: HTMLElement, attr: string): HTMLInputElement | null {
+  return root.querySelector<HTMLInputElement>(`#qualityRows input[data-attr="${attr}"]`);
+}
+
+/** 从界面上读回「胚子质量」的权重表（只含 > 0 的条目） */
+function qualityWeights(root: HTMLElement): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const input of root.querySelectorAll<HTMLInputElement>('#qualityRows input[data-key="qweight"]')) {
+    const w = Number(input.value);
+    if (w > 0) out[input.dataset['attr']!] = w;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,15 +326,18 @@ describe('权重：− / + 与数字框', () => {
     expect(weightInputs(root)[0]!.value).toBe('0');
   });
 
-  it('nextWeightUp / nextWeightDown 的落点', () => {
-    expect(nextWeightUp('暴击', 0)).toBe(2); // 默认权重
-    expect(nextWeightUp('暴伤', 0)).toBe(1);
-    expect(nextWeightUp('充能', 0)).toBe(1); // 默认 0 → 落到 1（不是 0.1）
-    expect(nextWeightUp('暴击', 2)).toBe(2.1);
-    expect(nextWeightDown('暴击', 2)).toBe(0); // 正好在默认值 → 归零
-    expect(nextWeightDown('暴击', 1.9)).toBe(1.8);
-    expect(nextWeightDown('充能', 1)).toBe(0.9); // 默认 0 → 没有「归零落点」，按步长
-    expect(nextWeightDown('', 0)).toBe(0);
+  it('nextWeightUp / nextWeightDown 的落点（第二个参数是该表的默认权重）', () => {
+    expect(nextWeightUp(0, 2)).toBe(2); // 默认权重
+    expect(nextWeightUp(0, 1)).toBe(1);
+    expect(nextWeightUp(0, 0)).toBe(1); // 没有默认口径 → 落到 1（不是 0.1）
+    expect(nextWeightUp(2, 2)).toBe(2.1);
+    expect(nextWeightDown(2, 2)).toBe(0); // 正好在默认值 → 归零
+    expect(nextWeightDown(1.9, 2)).toBe(1.8);
+    expect(nextWeightDown(1, 0)).toBe(0.9); // 没有默认口径 → 没有「归零落点」，按步长
+    expect(nextWeightDown(0, 0)).toBe(0);
+    // 「胚子质量」那套默认口径：暴击 3，`+` 一次到 3、`−` 从 3 直接归零
+    expect(nextWeightUp(0, QUALITY_WEIGHT['暴击'])).toBe(3);
+    expect(nextWeightDown(3, QUALITY_WEIGHT['暴击'])).toBe(0);
   });
 
   it('权重框要按回车 / 失焦才提交，打字过程中不动结果', () => {
@@ -594,31 +613,90 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelectorAll('[data-tab="more"] ul.todo li').length).toBeGreaterThan(0);
   });
 
-  it('胚子质量页有三个子 tab，且都有内容', () => {
+  it('胚子质量页有四个子 tab，「组合概率」在第一个', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    expect(subLabels(root)).toEqual([C.SUB_QUALITY_DIST, C.SUB_COMBOS, C.SUB_ATTRS]);
+    expect(subLabels(root)).toEqual([
+      C.SUB_COMBOS,
+      C.SUB_QUALITY_DIST,
+      C.SUB_QUALITY_DETAIL,
+      C.SUB_ATTRS,
+    ]);
+    // 默认只渲染第一个：组合概率的饼
+    expect(visibleSubPanel(root).querySelectorAll('svg.pie path.pie-slice').length).toBeGreaterThan(0);
+
+    clickSub(root, C.SUB_QUALITY_DIST);
     expect(visibleSubPanel(root).querySelector('svg')).not.toBeNull();
 
-    clickSub(root, C.SUB_COMBOS);
-    expect(visibleSubPanel(root).querySelectorAll('svg.pie path.pie-slice').length).toBeGreaterThan(0);
-    expect(visibleSubPanel(root).querySelectorAll('.legend-row').length).toBeGreaterThan(0);
+    clickSub(root, C.SUB_QUALITY_DETAIL);
+    expect(
+      visibleSubPanel(root).querySelectorAll('#qualityDetail rect.bar-seg').length,
+    ).toBeGreaterThan(0);
+    expect(visibleSubPanel(root).querySelector('#qualityDetail path.cum-line')).not.toBeNull();
 
     clickSub(root, C.SUB_ATTRS);
     expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);
   });
 
-  it('在质量页改权重，切回得分分布时结果也是新的', () => {
+  it('组合概率：标注画在图上，得分最高的那一项被摘出来', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    stepper(root, 1).plus.click(); // 暴伤 1 → 1.1
-    clickTab(root, 'growth');
-    expect(cardValues(root)[3]).not.toBe('50.7');
+    const pie = visibleSubPanel(root).querySelector('svg.pie')!;
+    // 每块都有名字 + 百分比（作者要求「在图中标记」）
+    const slices = pie.querySelectorAll('path.pie-slice').length;
+    expect(pie.querySelectorAll('text.pie-label')).toHaveLength(slices);
+    expect(pie.querySelectorAll('text.pie-pct')).toHaveLength(slices);
+    expect(pie.querySelectorAll('polyline.pie-leader')).toHaveLength(slices);
+    // 恰好一块被摘出来，且它是「有效词条全齐」的那一项（默认四条：暴击/暴伤/精通/大攻击）
+    const exploded = pie.querySelectorAll('path.pie-slice[data-explode="1"]');
+    expect(exploded).toHaveLength(1);
+    const idx = exploded[0]!.getAttribute('data-slice')!;
+    const label = pie.querySelector(`text.pie-label[data-slice="${idx}"]`)!.textContent!;
+    for (const attr of ['暴击', '暴伤', '精通', '大攻击']) expect(label).toContain(attr);
+    // 图里不标分数（作者明确说不需要）
+    expect(pie.textContent).not.toContain('分');
   });
 
-  it('两个 tab 共用同一份评分标准（含部位）', () => {
+  it('胚子质量的权重表：10 条词条全列出，条数不限、没有下拉', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const rows = [...root.querySelectorAll('#qualityRows .slot-row')];
+    expect(rows).toHaveLength(10);
+    expect(rows.map((r) => r.querySelector('.slot-name')!.textContent)).toEqual([...SUB_ATTRS]);
+    // 没有词条下拉、也没有「初始档位」列：这一页不看档位
+    expect(root.querySelector('#qualityRows select')).toBeNull();
+    expect(root.querySelector('#slotRows')).toBeNull();
+  });
+
+  it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    expect(qualityWeights(root)).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
+    // 有效词条卡片按这张表算
+    expect(cardValues(root)[0]).toBe('4 条');
+  });
+
+  it('胚子质量的权重与「得分分布」互不影响，且不乘成长值', () => {
+    const root = freshRoot();
+    mount(root);
+    const growthBestBefore = cardValues(root)[3]!;
+
+    clickTab(root, 'quality');
+    const crit = qualityWeightInput(root, '暴击')!;
+    setWeight(crit, '5'); // 3 → 5（超出 4 条上限也没关系，这一页条数不限）
+    expect(qualityWeights(root)['暴击']).toBe(5);
+    // 期望得分 = Σ 权重 × 出现概率，量纲就是「分」，不乘成长值
+    expect(Number(cardValues(root)[2])).toBeGreaterThan(0);
+
+    clickTab(root, 'growth');
+    expect(cardValues(root)[3]).toBe(growthBestBefore); // 得分分布没被动过
+  });
+
+  it('两个 tab 共用部位与主词条', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
@@ -627,6 +705,16 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelector<HTMLSelectElement>('#slot')!.value).toBe('头');
     expect(root.querySelector<HTMLSelectElement>('#mainAttr')!.value).toBe('暴击');
     expect(attrSelects(root).map((s) => s.value)).not.toContain('暴击');
+  });
+
+  it('部位与主词条在同一行（胚子质量页）', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    const pair = root.querySelector('#form .field-pair')!;
+    expect(pair.children).toHaveLength(2);
+    expect(pair.querySelector('#slot')).not.toBeNull();
+    expect(pair.querySelector('#mainAttr')).not.toBeNull();
   });
 });
 
@@ -989,8 +1077,8 @@ describe('状态 → 计算输入', () => {
     expect(toSpec(s).ignored).toContain('暴击');
   });
 
-  it('weightMap 只保留权重 > 0 的条目', () => {
-    expect(weightMap(defaultState())).toEqual({ 暴击: 2, 暴伤: 1 });
+  it('growthWeights 只保留权重 > 0 的条目', () => {
+    expect(growthWeights(defaultState())).toEqual({ 暴击: 2, 暴伤: 1 });
   });
 
   it('权重允许小数，但精度口径是两位小数', () => {
@@ -1006,7 +1094,18 @@ describe('状态 → 计算输入', () => {
     // 归整后为 0 的等同不计分
     s.slots[1]!.weight = 0.001;
     expect(toSpec(s).scoredCount).toBe(1);
-    expect(weightMap(s)).toEqual({ 暴击: 2 });
+    expect(growthWeights(s)).toEqual({ 暴击: 2 });
+  });
+
+  it('「胚子质量」的权重是独立的一份配置（条数不限）', () => {
+    // 默认口径与「得分分布」不同：暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2
+    expect(defaultState().weights).toEqual({ 暴击: 3, 暴伤: 3, 精通: 2, 大攻击: 2 });
+    // 它不参与 toSpec（那是「得分分布」的 4 槽位）
+    const s = defaultState();
+    s.weights = { 暴击: 5, 充能: 1, 精通: 2, 小生命: 1, 小攻击: 1, 小防御: 1 };
+    expect(toSpec(s).scoredCount).toBe(2);
+    // 条数不限：6 条也照样进 core（qualityDistribution 只认 weight > 0）
+    expect(Object.keys(s.weights)).toHaveLength(6);
   });
 
   it('selectableAttrs 剔掉与主词条同名的副词条', () => {

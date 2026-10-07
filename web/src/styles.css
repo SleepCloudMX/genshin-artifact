@@ -187,6 +187,9 @@ a.icon-btn { text-decoration: none; }
 /* 第一行三个框：部位 / 主词条 / 初始 */
 .field-trio { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; }
 .field-trio .field { margin-bottom: 12px; }
+/* 两个框一行：部位 / 主词条（「胚子质量」没有「初始」这一项） */
+.field-pair { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); gap: 8px; }
+.field-pair .field { margin-bottom: 12px; }
 
 select, input[type='number'] {
   width: 100%;
@@ -222,6 +225,8 @@ select:focus-visible, input:focus-visible, button:focus-visible {
 .slot-head > span:nth-child(2),
 .slot-head > span:nth-child(3) { text-align: center; }
 .slot-row { margin-bottom: 6px; }
+/* 「胚子质量」的权重表：词条名是固定文本（条数不限，所以没有下拉） */
+.slot-name { font-size: 13px; padding-left: 2px; }
 
 /* 权重：− [数字] +。原生 number 的上下箭头又小又难按，而这一列几乎只做小幅微调 */
 .stepper {
@@ -447,18 +452,10 @@ svg.chart { display: block; width: 100%; height: auto; }
 :root[data-theme='dark'] .hover-dot { stroke: #6ea8fe; }
 .hover-dot.on { opacity: 1; }
 
-/* 环形图 */
-.pie-wrap {
-  display: grid;
-  grid-template-columns: minmax(200px, 300px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: center;
-}
-@media (max-width: 700px) {
-  .pie-wrap { grid-template-columns: minmax(0, 1fr); }
-}
+/* 环形图：名字与百分比画在图上（画布是横的，左右留出标签位），所以比面板窄 */
+.pie-wrap { display: block; }
 .pie-box { display: flex; justify-content: center; }
-svg.pie { width: 100%; max-width: 300px; height: auto; }
+svg.pie { width: 100%; max-width: 560px; height: auto; }
 .pie-slice {
   stroke: var(--bg-elev);
   stroke-width: .6;
@@ -467,20 +464,20 @@ svg.pie { width: 100%; max-width: 300px; height: auto; }
 }
 svg.pie:has(.pie-slice:hover) .pie-slice { opacity: .45; }
 svg.pie .pie-slice:hover { opacity: 1; }
-.pie-legend-html { display: flex; flex-direction: column; gap: 3px; }
-.legend-row {
-  display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  font-size: 12.5px;
-  padding: 2px 4px;
-  border-radius: 5px;
-}
-.legend-row:hover { background: var(--bg-soft); }
-.legend-dot { width: 10px; height: 10px; border-radius: 3px; }
-.legend-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.legend-val { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+/* 摘出来的那一块：描边加深一点，配合外移的缺口一眼可辨 */
+.pie-slice.exploded { stroke: var(--text-faint); stroke-width: .8; }
+.pie-leader { fill: none; stroke: var(--border-strong); stroke-width: .5; }
+.pie-label { fill: var(--text); font-size: 3.1px; }
+.pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }
+
+/* 质量分布（详细）：柱内标注 + 累计概率曲线 */
+.seg-label { fill: #fff; font-size: 9.5px; font-weight: 600; }
+.seg-pct { fill: rgb(255 255 255 / 82%); font-size: 9px; font-family: var(--mono); }
+.cum-line { fill: none; stroke: #e74c3c; stroke-width: 2; }
+.cum-dot { fill: #e74c3c; }
+.cum-guide { stroke: #e74c3c; stroke-width: .6; stroke-dasharray: 3 4; opacity: .3; }
+.cum-label { fill: #e74c3c; font-size: 10px; font-family: var(--mono); }
+.cum-title { fill: #e74c3c; font-size: 11px; }
 
 /* ---------- 浮框 ---------- */
 .tooltip-host { position: fixed; inset: 0; pointer-events: none; z-index: 50; }

@@ -12,14 +12,17 @@ import { describe, expect, it } from 'vitest';
 import {
   renderScoreBars,
   renderSurvival,
+  renderQualityStacked,
   type SurvivalChartOptions,
   renderHistogram,
+  hitColor,
   niceAxis,
   tickIndices,
   nearestIndex,
 } from '../src/render/charts';
 import { renderPie } from '../src/render/pie';
 import { Tooltip } from '../src/render/tooltip';
+import { pctTick } from '../src/ui/format';
 
 function makeTooltip(): Tooltip {
   const host = document.createElement('div');
@@ -37,6 +40,15 @@ function makeData(bars: number) {
 const HIT_LABELS = Array.from({ length: 6 }, (_, h) => `命中 ${h} 次`);
 
 describe('坐标轴工具', () => {
+  it('轴标号的小数位跟着刻度走（不再出现 `1%` 与 `0.5000%` 混排）', () => {
+    expect(pctTick(0, 0.02)).toBe('0%');
+    expect(pctTick(0.02, 0.02)).toBe('2%');
+    // 0.5% 的步长：一律一位小数，且不能被写成 `1%`（那是下一个刻度）
+    expect(pctTick(0.005, 0.005)).toBe('0.5%');
+    expect(pctTick(0.01, 0.005)).toBe('1.0%');
+    expect(pctTick(0.0025, 0.0025)).toBe('0.25%');
+  });
+
   it('niceAxis 给出整齐的上限与步长', () => {
     const a = niceAxis(0.19);
     expect(a.max % a.step).toBeCloseTo(0, 10);
@@ -388,6 +400,103 @@ describe('分类柱状图', () => {
   });
 });
 
+describe('质量分布（详细）', () => {
+  const bars = [
+    {
+      score: 0,
+      total: 0.3,
+      atLeast: 1,
+      segments: [
+        { label: '无有效词条', size: 0, p: 0.3 },
+      ],
+    },
+    {
+      score: 3,
+      total: 0.5,
+      atLeast: 0.7,
+      segments: [
+        { label: '暴击', size: 1, p: 0.3 },
+        { label: '暴击 + 精通', size: 2, p: 0.15 },
+        { label: '暴击 + 精通 + 大攻击', size: 3, p: 0.05 },
+      ],
+    },
+    {
+      score: 7,
+      total: 0.2,
+      atLeast: 0.2,
+      segments: [
+        { label: '暴击 + 精通 + 大攻击 + 暴伤', size: 4, p: 0.2 },
+      ],
+    },
+  ];
+
+  it('每根柱子按组合拆成多段，段色按「几条有效词条」取', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(5);
+    // 0 条 / 1 条 / 2 条 / 3 条 / 4 条各一段，颜色必须与 hitColor(条数) 一致
+    const fills = [...svg.querySelectorAll('rect.bar-seg')].map((r) => r.getAttribute('fill'));
+    expect(new Set(fills)).toEqual(
+      new Set([0, 1, 2, 3, 4].map((n) => hitColor(n))),
+    );
+  });
+
+  it('堆叠顺序按条数从少到多（条数少的在下面）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    const segs = [...svg.querySelectorAll('rect.bar-seg')];
+    // 第 2 根柱子 3 段，DOM 顺序 = 绘制顺序 = 从下往上：1 条 → 2 条 → 3 条。
+    // SVG 的 y 向下，所以「在下」= y 更大。
+    const three = segs.slice(1, 4).map((r) => Number(r.getAttribute('y')));
+    expect(three[0]!).toBeGreaterThan(three[1]!);
+    expect(three[1]!).toBeGreaterThan(three[2]!);
+  });
+
+  it('画出累计概率曲线与节点，右侧标出真实概率', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect(svg.querySelector('path.cum-line')).not.toBeNull();
+    expect(svg.querySelectorAll('rect.cum-dot')).toHaveLength(3);
+    const labels = [...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent);
+    expect(labels).toEqual(['100.0%', '70.0%', '20.0%']);
+    expect(svg.querySelector('text.cum-title')!.textContent).toBe('累计概率');
+  });
+
+  it('段内标注放得下才画（小段交给浮框）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    const names = [...svg.querySelectorAll('text.seg-label')].map((n) => n.textContent);
+    // 图例里也有文字，这里只看段内标注
+    expect(names).not.toContain('暴击 + 精通 + 大攻击 + 暴伤'); // 11 字放不进柱宽
+    expect(svg.querySelectorAll('text.seg-pct').length).toBe(names.length);
+  });
+
+  it('每根柱子一块热区 + 一条竖线（悬停交互）', () => {
+    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('rect.hot-rect')).toHaveLength(3);
+    expect(svg.querySelector('line.guide')).not.toBeNull();
+  });
+
+  it('悬停给出该分数的组合明细与累计概率', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(renderQualityStacked({ bars, tooltip }));
+    host
+      .querySelectorAll('rect.hot-rect')[1]!
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+
+    const tt = host.querySelector('.tooltip')!;
+    expect(tt.querySelector('.tt-title')!.textContent).toBe('3 分');
+    expect(tt.querySelector('.tt-badge')!.textContent).toBe('50.00%');
+    const rows = [...tt.querySelectorAll('.tt-row')].map((r) => r.textContent);
+    expect(rows.some((t) => t!.includes('暴击 + 精通'))).toBe(true);
+    expect(rows.some((t) => t!.includes('本分数合计'))).toBe(true);
+    expect(tt.textContent).toContain('P(得分 ≥ 3) = 70.00%');
+  });
+
+  it('空数据不抛错', () => {
+    const svg = renderQualityStacked({ bars: [], tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(0);
+  });
+});
+
 describe('环形图', () => {
   const items = [
     { label: '暴击 + 暴伤', p: 0.4 },
@@ -407,6 +516,48 @@ describe('环形图', () => {
       tooltip: makeTooltip(),
     });
     expect(svg.querySelectorAll('path.pie-slice')).toHaveLength(3);
+  });
+
+  it('每块都有图内标注：折线 + 名字 + 百分比', () => {
+    const svg = renderPie({ items, title: 't', tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('polyline.pie-leader')).toHaveLength(3);
+    expect(svg.querySelectorAll('text.pie-label')).toHaveLength(3);
+    const pcts = [...svg.querySelectorAll('text.pie-pct')].map((n) => n.textContent);
+    expect(pcts).toEqual(['40.00%', '30.00%', '30.00%']);
+    expect([...svg.querySelectorAll('text.pie-label')].map((n) => n.textContent)).toEqual([
+      '暴击 + 暴伤',
+      '暴伤 + 大攻击',
+      '其他 8 种组合',
+    ]);
+  });
+
+  it('explode 的那一块真的被移开了，并带标记', () => {
+    const svg = renderPie({
+      items: [...items.slice(0, 2), { label: '暴击 + 暴伤 + 精通', p: 0.02, explode: true }],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const exploded = svg.querySelectorAll('path.pie-slice[data-explode="1"]');
+    expect(exploded).toHaveLength(1);
+    expect(exploded[0]!.getAttribute('transform')).toMatch(/^translate\(/);
+    expect(exploded[0]!.classList.contains('exploded')).toBe(true);
+    // 其余分片不位移
+    const others = [...svg.querySelectorAll('path.pie-slice')].filter(
+      (p) => p.getAttribute('data-explode') !== '1',
+    );
+    for (const p of others) expect(p.getAttribute('transform')).toBeNull();
+  });
+
+  it('同一侧的标签会避让，不会互相叠住', () => {
+    // 12 块等分：中缝落点很近，不避让的话标签会重叠
+    const many = Array.from({ length: 12 }, (_, i) => ({ label: `组合 ${i}`, p: 1 / 12 }));
+    const svg = renderPie({ items: many, title: 't', tooltip: makeTooltip() });
+    for (const side of ['start', 'end']) {
+      const ys = [...svg.querySelectorAll(`text.pie-label[text-anchor="${side}"]`)]
+        .map((n) => Number(n.getAttribute('y')))
+        .sort((a, b) => a - b);
+      for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThan(4);
+    }
   });
 
   it('全 0 不抛错', () => {

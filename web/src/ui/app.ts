@@ -54,21 +54,28 @@ import {
 import {
   qualityDistribution,
   pieSlices,
+  sameCombo,
   comboLabel,
   dropProbability,
+  type QualityCombo,
   type QualityDistribution,
 } from '../core/quality';
 import {
   renderScoreBars,
   renderSurvival,
   renderHistogram,
+  renderQualityStacked,
   hitColor,
+  type QualityBar,
   type StackedDatum,
 } from '../render/charts';
 import { renderPie } from '../render/pie';
 import { Tooltip } from '../render/tooltip';
 import {
+  CANONICAL_WEIGHT,
+  QUALITY_WEIGHT,
   defaultGrowth,
+  defaultQuality,
   defaultShared,
   fromQuery,
   toQuery,
@@ -79,9 +86,10 @@ import {
   weightOnSelect,
   selectableAttrs,
   toSpec,
-  weightMap,
+  growthWeights,
   type AppState,
   type GrowthConfig,
+  type QualityConfig,
   type SharedConfig,
   type SlotInput,
 } from './state';
@@ -411,18 +419,19 @@ export function mount(root: HTMLElement): void {
    * 权重是 `−` / 数字框 / `+`：原生 number 的上下箭头太小，而这一列几乎只做小幅微调。
    * `+` 从 0 直接跳到该词条的默认权重，`−` 从默认权重直接归零——见 `state.ts`。
    *
-   * `rollColumn = false` 用于「胚子质量」：初始档位是**强化**才有的事。
+   * **只有「得分分布」用它**：「初始档位」是强化才有的事；
+   * 「胚子质量」的权重表条数不限、也不看档位，是另一张表（`qualityWeightsField`）。
    */
-  function slotsField(rollColumn: boolean): { box: HTMLElement; refresh(): void } {
+  function slotsField(): { box: HTMLElement; refresh(): void } {
     const box = node('div', { class: 'slots' });
     box.append(
       node('h3', { class: 'sub' }, C.SECT_SUBSTATS),
-      node('p', { class: 'hint' }, rollColumn ? C.SUBSTATS_HINT_ROLL : C.SUBSTATS_HINT_NOROLL),
+      node('p', { class: 'hint' }, C.SUBSTATS_HINT_ROLL),
     );
 
     const head = node('div', { class: 'slot-head' });
     head.append(node('span', {}, C.COL_ATTR), node('span', {}, C.COL_WEIGHT));
-    if (rollColumn) head.append(node('span', {}, C.COL_ROLL));
+    head.append(node('span', {}, C.COL_ROLL));
     box.append(head);
 
     const rows = node('div', { class: 'slot-rows', id: 'slotRows' });
@@ -481,8 +490,8 @@ export function mount(root: HTMLElement): void {
           const cur_input = t.parentElement?.querySelector<HTMLInputElement>('input[data-key="weight"]');
           const from = Number(cur_input?.value ?? cur.weight);
           const base = Number.isFinite(from) ? from : cur.weight;
-          cur.weight =
-            delta > 0 ? nextWeightUp(cur.attr, base) : nextWeightDown(cur.attr, base);
+          const canonical = cur.attr === '' ? 0 : CANONICAL_WEIGHT[cur.attr];
+          cur.weight = delta > 0 ? nextWeightUp(base, canonical) : nextWeightDown(base, canonical);
           break;
         }
         case 'roll': {
@@ -513,7 +522,6 @@ export function mount(root: HTMLElement): void {
       rows.replaceChildren();
       state.slots.forEach((slot, i) => {
         const r = node('div', { class: 'slot-row' });
-        if (!rollColumn) r.classList.add('two-col');
 
         const sel = node('select', { 'data-slot': String(i), 'data-key': 'attr' });
         sel.append(option('', '（不计分）', slot.attr === ''));
@@ -559,13 +567,10 @@ export function mount(root: HTMLElement): void {
         );
         stepper.append(minus, input, plus);
 
-        const roll = rollColumn
-          ? node('select', { 'data-slot': String(i), 'data-key': 'roll' })
-          : null;
-        if (roll) fillRollOptions(roll, slot.attr, slot.weight, slot.initialRoll);
+        const roll = node('select', { 'data-slot': String(i), 'data-key': 'roll' });
+        fillRollOptions(roll, slot.attr, slot.weight, slot.initialRoll);
 
-        r.append(sel, stepper);
-        if (roll) r.append(roll);
+        r.append(sel, stepper, roll);
         rows.append(r);
         syncRow(r, slot);
       });
@@ -616,6 +621,114 @@ export function mount(root: HTMLElement): void {
     sync(): void;
   }
 
+  /**
+   * 「胚子质量」的词条权重表：**10 条副词条全部列出，条数不限**。
+   *
+   * 与「得分分布」那张表的区别（作者明确要求）：
+   *   - 那边是「4 个槽位」——胚子终态就是 4 条副词条，槽位顺序还有语义（决定 3 词条胚子
+   *     的第 4 条是谁），所以必须定长、必须能选词条、还带「初始档位」；
+   *   - 这一页统计的是「这些词条长在胚子上的情况」，关心一条还是十条都行，
+   *     所以固定 10 行、每行一个权重框（`> 0` 即有效词条），没有下拉也没有档位。
+   *
+   * 权重就是**分**，不乘成长值；默认口径是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2。
+   * 行数固定，所以只需要同步数值，永远不重建。
+   */
+  function qualityWeightsField(): { box: HTMLElement; refresh(): void } {
+    const box = node('div', { class: 'slots' });
+    box.append(
+      node('h3', { class: 'sub' }, C.SECT_SUBSTATS),
+      node('p', { class: 'hint' }, C.QUALITY_WEIGHTS_HINT),
+    );
+    const head = node('div', { class: 'slot-head two-col' });
+    head.append(node('span', {}, C.COL_ATTR), node('span', {}, C.COL_WEIGHT));
+    box.append(head);
+
+    const rows = node('div', { class: 'slot-rows', id: 'qualityRows' });
+    box.append(rows);
+
+    SUB_ATTRS.forEach((attr, i) => {
+      const r = node('div', { class: 'slot-row two-col' });
+      r.append(node('span', { class: 'slot-name' }, attr));
+      const stepper = node('div', { class: 'stepper' });
+      const step = (delta: -1 | 1): HTMLButtonElement =>
+        node(
+          'button',
+          {
+            type: 'button',
+            class: 'step',
+            'data-attr': attr,
+            'data-key': 'qstep',
+            'data-delta': String(delta),
+            'aria-label': delta > 0 ? C.ARIA_WEIGHT_UP : C.ARIA_WEIGHT_DOWN,
+          },
+          delta > 0 ? '+' : '−',
+        );
+      const input = node('input', {
+        type: 'number',
+        min: '0',
+        step: '0.1',
+        inputmode: 'decimal',
+        'data-attr': attr,
+        'data-key': 'qweight',
+        'aria-label': C.ariaWeightOf(attr, i),
+      });
+      stepper.append(step(-1), input, step(1));
+      r.append(stepper);
+      rows.append(r);
+    });
+
+    // 与「得分分布」同一套交互：**回车 / 失焦才提交**（见 slotsField 的注释），
+    // 步进按钮读输入框的当前值而不是 state。
+    rows.addEventListener('change', onEdit);
+    rows.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).dataset['key'] === 'qstep') onEdit(ev);
+    });
+
+    function onEdit(ev: Event): void {
+      const t = ev.target as HTMLInputElement | HTMLButtonElement;
+      const attr = t.dataset['attr'] as SubAttr | undefined;
+      if (!attr) return;
+      const weights = { ...state.weights };
+      const canonical = QUALITY_WEIGHT[attr];
+
+      if (t.dataset['key'] === 'qweight') {
+        const raw = t.value.trim();
+        const w = raw === '' ? 0 : quantizeWeight(Number(raw));
+        if (w > 0) weights[attr] = w;
+        else delete weights[attr];
+      } else if (t.dataset['key'] === 'qstep') {
+        const input = t.parentElement?.querySelector<HTMLInputElement>('input[data-key="qweight"]');
+        const from = Number(input?.value ?? weights[attr] ?? 0);
+        const base = Number.isFinite(from) ? from : (weights[attr] ?? 0);
+        const next =
+          Number(t.dataset['delta']) > 0
+            ? nextWeightUp(base, canonical)
+            : nextWeightDown(base, canonical);
+        if (next > 0) weights[attr] = next;
+        else delete weights[attr];
+      } else {
+        return;
+      }
+      setState({ weights });
+    }
+
+    return {
+      box,
+      refresh() {
+        SUB_ATTRS.forEach((attr, i) => {
+          const r = rows.children[i] as HTMLElement | undefined;
+          if (!r) return;
+          const w = state.weights[attr] ?? 0;
+          const input = r.querySelector<HTMLInputElement>('input[data-key="qweight"]');
+          // 正在编辑的框不覆盖（避免光标跳到末尾），与 slotsField 一致
+          if (input && document.activeElement !== input) input.value = String(w);
+          const minus = r.querySelector<HTMLButtonElement>('.step[data-delta="-1"]');
+          if (minus) minus.disabled = !(w > 0);
+        });
+      },
+    };
+  }
+
   function initialField(): Control {
     const sel = node('select', { id: 'initialVisible' });
     sel.append(option('4', '4 词条', state.initialVisible === 4));
@@ -663,7 +776,7 @@ export function mount(root: HTMLElement): void {
     return {
       box,
       refresh() {
-        const weights = weightMap(state);
+        const weights = growthWeights(state);
         // 按计分权重降序：常用的排在上面
         const attrs = SUB_ATTRS.filter((a) => (weights[a] ?? 0) > 0).sort(
           (a, b) => (weights[b] ?? 0) - (weights[a] ?? 0),
@@ -718,7 +831,7 @@ export function mount(root: HTMLElement): void {
       pair.append(slot.box, main.box, initial.box);
       form.append(pair);
 
-      const slots = slotsField(true);
+      const slots = slotsField();
       const target = targetField();
       form.append(slots.box, target.box);
 
@@ -932,8 +1045,12 @@ export function mount(root: HTMLElement): void {
         const attempts = expectedAttempts(table, state.targetScore);
         const best = table.scores[table.scores.length - 1] ?? 0;
 
-        // 掉落概率：不含成长值，只回答「能不能刷到这件胚子」
-        const drop = dropProbability({ mainAttr: state.mainAttr, weights: weightMap(state) }, state.slot);
+        // 掉落概率：不含成长值，只回答「能不能刷到这件胚子」。
+        // 用「得分分布」那套计分词条 —— 这张卡在这一页，问的就是这一页要的词条。
+        const drop = dropProbability(
+          { mainAttr: state.mainAttr, weights: growthWeights(state) },
+          state.slot,
+        );
         const dropNote =
           drop.p > 0
             ? C.dropBreakdown(pct(drop.mainP), pct(drop.subsP))
@@ -954,6 +1071,44 @@ export function mount(root: HTMLElement): void {
   // Tab 2：胚子质量
   // -------------------------------------------------------------------------
 
+  /**
+   * 得分最高的那个组合（= 有效词条全齐的那一项），用来把饼图上那一块摘出来。
+   *
+   * 概率最大的组合往往只有一两条词条，得分最高的那一项反而最稀有 ——
+   * 不摘出来、不单独标注，它在饼上就是一道看不见的缝。
+   * 平局时取词条多的那个（语义上更是「全齐」）；没有有效词条时返回 `undefined`。
+   */
+  function topComboOf(d: QualityDistribution): SubAttr[] | undefined {
+    let best: QualityCombo | undefined;
+    for (const c of d.combos) {
+      if (!best || c.score > best.score || (c.score === best.score && c.combo.length > best.combo.length)) {
+        best = c;
+      }
+    }
+    return best && best.score > 0 ? [...best.combo] : undefined;
+  }
+
+  /** 把质量分布整理成「详细图」的柱子：得分升序，并补上 P(≥ 该分数) */
+  function qualityBarsOf(d: QualityDistribution): QualityBar[] {
+    const out: QualityBar[] = [];
+    let acc = 0;
+    for (let i = d.buckets.length - 1; i >= 0; i--) {
+      const b = d.buckets[i]!;
+      acc += b.p;
+      out.push({
+        score: b.score,
+        total: b.p,
+        atLeast: acc,
+        segments: b.combos.map((c) => ({
+          label: comboLabel(c.combo),
+          size: c.combo.length,
+          p: c.p,
+        })),
+      });
+    }
+    return out.reverse();
+  }
+
   const qualityTab: Tab = {
     id: 'quality',
     label: C.TAB_QUALITY,
@@ -964,15 +1119,18 @@ export function mount(root: HTMLElement): void {
       form.addEventListener('submit', (ev) => ev.preventDefault());
       const slot = slotField();
       const main = mainAttrField();
-      form.append(panelHead(C.CONFIG, [resetBtn]), slot.box, main.box);
+      // 部位与主词条同一行：这一页没有「初始词条数」，两栏摆开刚好
+      const pair = node('div', { class: 'field-pair' });
+      pair.append(slot.box, main.box);
+      form.append(panelHead(C.CONFIG, [resetBtn]), pair);
 
-      const slots = slotsField(false);
-      form.append(slots.box);
+      const weights = qualityWeightsField();
+      form.append(weights.box);
       host.append(form);
       this.syncControls = () => {
         slot.sync();
         main.sync();
-        slots.refresh();
+        weights.refresh();
       };
     },
 
@@ -986,6 +1144,44 @@ export function mount(root: HTMLElement): void {
       let dist: QualityDistribution | null = null;
 
       const subs: SubTab[] = [
+        {
+          /**
+           * 组合概率（第一个子 tab，作者指定）——「这一页最该先回答的问题」。
+           *
+           * 标注全部画在图上；**得分最高的那一项（有效词条全齐）从圆心摘出来**：
+           * 它概率最小，不摘出来根本看不见，而它恰恰是玩家最关心的那一档。
+           */
+          label: C.SUB_COMBOS,
+          render(box) {
+            const p = panel('', C.COMBOS_HINT);
+            const wrap = node('div', { class: 'pie-wrap' });
+            const pieBox = node('div', { class: 'pie-box' });
+            wrap.append(pieBox);
+            p.body.append(wrap);
+            box.append(p.box);
+            if (!dist) return;
+
+            const top = topComboOf(dist);
+            const slices = pieSlices(dist.combos, {
+              maxSlices: 8,
+              minShare: 0.005,
+              ...(top ? { keep: top } : {}),
+            });
+            pieBox.append(
+              renderPie({
+                items: slices.map((s) => ({
+                  label: s.label,
+                  p: s.p,
+                  ...(top && s.combos.length === 1 && sameCombo(s.combos[0]!.combo, top)
+                    ? { explode: true, note: C.COMBOS_TOP_NOTE }
+                    : {}),
+                })),
+                title: C.SUB_COMBOS,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
         {
           label: C.SUB_QUALITY_DIST,
           render(box) {
@@ -1011,27 +1207,23 @@ export function mount(root: HTMLElement): void {
           },
         },
         {
-          label: C.SUB_COMBOS,
+          /**
+           * 质量分布（详细）：每根柱子按「是哪几条词条的组合」拆开堆叠，
+           * 再叠一条累计概率曲线。参考 `docs/ai-ref/v1/init_stats/暴伤/质量分布-详细-1.png`。
+           */
+          label: C.SUB_QUALITY_DETAIL,
           render(box) {
-            const p = panel('', C.COMBOS_HINT);
-            const wrap = node('div', { class: 'pie-wrap' });
-            const pieBox = node('div', { class: 'pie-box' });
-            const legend = node('div', { class: 'pie-legend-html' });
-            wrap.append(pieBox, legend);
-            p.body.append(wrap);
+            const p = panel('', C.QUALITY_DETAIL_HINT);
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'qualityDetail' });
+            p.body.append(chart);
             box.append(p.box);
             if (!dist) return;
-
-            const slices = pieSlices(dist.combos, { maxSlices: 8, minShare: 0.005 });
-            pieBox.append(renderPie({ items: slices, title: C.SUB_COMBOS, tooltip: tabCtx.tooltip }));
-            legend.replaceChildren(
-              ...slices.map((s, i) => {
-                const r = node('div', { class: 'legend-row' });
-                const dot = node('span', { class: 'legend-dot' });
-                dot.style.background = hitColor(i);
-                r.append(dot, node('span', { class: 'legend-name' }, s.label));
-                r.append(node('span', { class: 'legend-val' }, pct(s.p)));
-                return r;
+            chart.append(
+              renderQualityStacked({
+                bars: qualityBarsOf(dist),
+                host: chart,
+                tooltip: tabCtx.tooltip,
               }),
             );
           },
@@ -1044,7 +1236,7 @@ export function mount(root: HTMLElement): void {
             p.body.append(t.table);
             box.append(p.box);
             if (!dist) return;
-            const weights = weightMap(state);
+            const weights = state.weights;
             t.body.replaceChildren(
               ...dist.attrProbs
                 .slice()
@@ -1062,7 +1254,8 @@ export function mount(root: HTMLElement): void {
 
       this.update = () => {
         try {
-          dist = qualityDistribution({ mainAttr: state.mainAttr, weights: weightMap(state) });
+          // 胚子质量用自己的权重表（每条词条一个分，不乘成长值），与「得分分布」无关
+          dist = qualityDistribution({ mainAttr: state.mainAttr, weights: state.weights });
         } catch (err) {
           dist = null;
           note.textContent = `${C.CALC_FAILED}${(err as Error).message}`;

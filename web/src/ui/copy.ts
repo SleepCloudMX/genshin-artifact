@@ -39,10 +39,16 @@ export const MAIN_FIXED = '固定';
 export const MAIN_FIXED_HINT = '生之花与死之羽的主词条固定，没有可选项。';
 
 export const SECT_SUBSTATS = '副词条';
-/** 「初始档位」列不存在时（胚子质量页）不显示这段 */
+/** 「初始档位」列存在时（得分分布页） */
 export const SUBSTATS_HINT_ROLL =
   '「初始档位」= 掉落时那一次成长的档位，固定它可算上下界。';
-export const SUBSTATS_HINT_NOROLL = '只统计权重大于 0 的词条。';
+/**
+ * 「胚子质量」页的副词条说明。
+ *
+ * 这一页与「得分分布」的差别是**条数不限**：那边是 4 个槽位（胚子终态就是 4 条），
+ * 这边只统计「这些词条长在胚子上的情况」。权重就是分数，**不乘成长值**。
+ */
+export const QUALITY_WEIGHTS_HINT = '权重即得分，不乘成长值；条数不限，0 为不计分。';
 
 export const COL_ATTR = '词条';
 export const COL_WEIGHT = '权重';
@@ -85,6 +91,7 @@ export const SUB_HITS = '命中次数';
 export const SUB_QUANTILE = '分位分数线';
 export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
+export const SUB_QUALITY_DETAIL = '质量分布（详细）';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
 
@@ -189,7 +196,10 @@ export function topPercent(alpha: number): string {
 }
 
 export const QUALITY_DIST_HINT = '仅统计掉落瞬间的 4 个副词条，不含强化成长。';
-export const COMBOS_HINT = '概率过小的长尾合并为「其他」。';
+export const COMBOS_HINT = '得分最高的那一项已单独摘出；概率过小的长尾合并为「其他」。';
+export const COMBOS_TOP_NOTE = '有效词条全齐，得分最高的那一项';
+export const QUALITY_DETAIL_HINT =
+  '柱内按组合拆开，颜色 = 组合里的有效词条条数；红线为累计概率（右轴）。';
 export const ATTRS_HINT = '「胚子含该词条」的概率；词条不重复，故不等于权重占比。';
 export const TH_ATTR = '词条';
 export const TH_ATTR_PROB = '出现概率';

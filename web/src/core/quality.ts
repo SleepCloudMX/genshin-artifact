@@ -234,25 +234,37 @@ export interface PieSlice {
  * 把组合概率整理成饼图分片：按概率降序取前 `maxSlices` 个，
  * 概率低于 `minShare` 的以及超出上限的长尾合并成一个「其他」扇区。
  *
+ * `keep` 指定的那个组合**永远单独成片**（且不占 `maxSlices` 的名额）：
+ * 它正是「有效词条全齐」的那一项 —— 概率最小，却常是这张图要回答的问题
+ * （参考实现 `plot_attr_pie` 就是这么把它从饼里「摘出来」画的）。
+ *
  * 不变量：所有分片的概率之和 === 所有组合的概率之和（图形不会丢概率）。
  */
 export function pieSlices(
   combos: readonly QualityCombo[],
-  opts: { maxSlices?: number; minShare?: number } = {},
+  opts: { maxSlices?: number; minShare?: number; keep?: readonly SubAttr[] } = {},
 ): PieSlice[] {
   const maxSlices = opts.maxSlices ?? 12;
   const minShare = opts.minShare ?? 0.005;
+  const keep = opts.keep;
   const sorted = [...combos].sort((x, y) => y.p - x.p);
 
   const slices: PieSlice[] = [];
   const rest: QualityCombo[] = [];
-  sorted.forEach((c, i) => {
-    if (i < maxSlices && c.p >= minShare) {
+
+  const kept = keep && keep.length > 0 ? sorted.find((c) => sameCombo(c.combo, keep)) : undefined;
+  if (kept) slices.push({ label: comboLabel(kept.combo), p: kept.p, combos: [kept], aggregated: false });
+
+  let taken = 0;
+  for (const c of sorted) {
+    if (c === kept) continue;
+    if (taken < maxSlices && c.p >= minShare) {
       slices.push({ label: comboLabel(c.combo), p: c.p, combos: [c], aggregated: false });
+      taken++;
     } else {
       rest.push(c);
     }
-  });
+  }
 
   if (rest.length > 0) {
     slices.push({
@@ -263,6 +275,21 @@ export function pieSlices(
     });
   }
   return slices;
+}
+
+/**
+ * 两个组合是否是同一组词条（顺序无关）。
+ *
+ * 「得分最高的那一项」要在饼图上单独摘出来（`pieSlices` 的 `keep`），
+ * 而组合的顺序在不同路径上不一定一样，所以比集合而不是比数组。
+ */
+export function sameCombo(a: readonly SubAttr[], b: readonly SubAttr[]): boolean {
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/** 组合里有几条有效词条（= 堆叠图与饼图的颜色档） */
+export function comboSize(combo: readonly SubAttr[]): number {
+  return combo.length;
 }
 
 /** 某分片是否含指定词条（用于饼图 / 堆叠图的高亮） */

@@ -8,6 +8,23 @@ export function pct(p: number, digits?: number): string {
   return `${(p * 100).toExponential(2)}%`;
 }
 
+/**
+ * **轴标号**用的百分比：小数位由刻度间隔决定，同一根轴上格式统一。
+ *
+ * 不能直接用 `pct`：它在小概率那档会切到 4 位小数，于是同一根轴上会出现
+ * `1%` 与 `0.5000%` 并排（`niceAxis` 给出 0.5% 步长时就会遇到）。
+ * 也不能一律 `toFixed(0)`：0.5% 会被写成 `1%`，与真正的 1% 撞在一起。
+ * 所以按「几位小数才写得下这个步长」来定，`0.5%` → `0.5%`、`2%` → `2%`。
+ */
+export function pctTick(p: number, step: number): string {
+  const stepPct = Math.abs(step) * 100;
+  let digits = 0;
+  for (; digits < 4; digits++) {
+    if (Math.abs(Number(stepPct.toFixed(digits)) - stepPct) < 1e-9) break;
+  }
+  return `${(p * 100).toFixed(digits)}%`;
+}
+
 /** 「1 / p」的直观表达：大约多少次里出一次 */
 export function oneIn(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '—';

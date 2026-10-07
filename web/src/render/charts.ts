@@ -12,7 +12,7 @@
  * 交互：所有图共用一个浮框（`Tooltip`），悬停时高亮整列并移动辅助线。
  */
 
-import { pct } from '../ui/format';
+import { pct, pctTick } from '../ui/format';
 import { Tooltip, type TooltipBar, type TooltipRow } from './tooltip';
 
 const NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -306,7 +306,7 @@ export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
 
   const totals = data.map((d) => d.byHit.reduce((s, v) => s + v, 0));
   const axis = niceAxis(Math.max(...totals));
-  yAxis(f, axis, (v) => pct(v, 0));
+  yAxis(f, axis, (v) => pctTick(v, axis.step));
 
   const bandW = f.plotW / data.length;
   const barW = Math.max(1, Math.min(bandW * 0.74, 30));
@@ -510,7 +510,7 @@ export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
 
   // 纵轴固定 0~100%：概率本身就是这个量纲，不需要自适应
   const axis = { max: 1, step: 0.25 };
-  yAxis(f, axis, (v) => pct(v, 0));
+  yAxis(f, axis, (v) => pctTick(v, axis.step));
 
   const bandW = f.plotW / scores.length;
   const xOf = (i: number): number => (i + 0.5) * bandW;
@@ -686,7 +686,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 
   const max = opts.upper ?? Math.max(...items.map((d) => d.value)) * 1.08;
   const axis = niceAxis(max, 4);
-  yAxis(f, axis, (v) => (opts.format ? format(v) : pct(v, 0)));
+  yAxis(f, axis, (v) => (opts.format ? format(v) : pctTick(v, axis.step)));
 
   const bandW = f.plotW / items.length;
   const barW = Math.max(2, Math.min(bandW * 0.62, 76));
@@ -742,6 +742,247 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
             { label: '概率', value: format(d.value), color: d.color ?? hitColor(i) },
             ...(d.note ? [{ label: '说明', value: d.note }] : []),
           ],
+        },
+        ev.clientX,
+        ev.clientY,
+      );
+    });
+    hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
+    hit.addEventListener('mouseleave', () => {
+      guide.classList.remove('on');
+      tooltip.hide();
+    });
+    f.plot.append(hit);
+  });
+
+  return f.svg;
+}
+
+// ---------------------------------------------------------------------------
+// 4. 胚子质量（详细）：按组合堆叠的柱 + 累计概率曲线
+// ---------------------------------------------------------------------------
+
+/** 一根柱子里的一个组合段 */
+export interface QualitySegment {
+  /** 组合的展示名，如 `暴击 + 充能` */
+  label: string;
+  /** 组合里有几条有效词条（= 颜色档，也是堆叠顺序） */
+  size: number;
+  /** 该组合占全部胚子的概率 */
+  p: number;
+}
+
+export interface QualityBar {
+  /** 该柱对应的胚子得分 */
+  score: number;
+  /** 该分数的总概率 */
+  total: number;
+  /** P(得分 ≥ 该分数) */
+  atLeast: number;
+  /** 柱内的组合段 */
+  segments: QualitySegment[];
+}
+
+export interface QualityChartOptions {
+  /** 得分升序 */
+  bars: QualityBar[];
+  /** 图内标题；通常由外层 HTML 负责 */
+  title?: string;
+  host?: HTMLElement | null;
+  width?: number;
+  height?: number;
+  tooltip: Tooltip;
+}
+
+/**
+ * 胚子质量的**详细**分布：每根柱子按「是哪几条词条的组合」拆开堆叠，
+ * 再把累计概率 `P(得分 ≥ 该分数)` 叠成一条红线。
+ *
+ * ## 为什么这一张图允许「两个量纲同框」
+ *
+ * 站内的一般规矩是**纵轴各自独立、不叠量纲**（生存曲线当初就是因为被柱子上限压扁才拆出去的）。
+ * 这张图是作者点名要的（参考 `docs/ai-ref/v1/init_stats/暴伤/质量分布-详细-1.png`），
+ * 处理办法与参考实现一致：**把累计概率按比例缩放进柱子的量纲**（除以 1.1），
+ * 右侧再画一条从 0 到 1 的轴把真实概率标出来 —— 曲线不会被压扁，
+ * 也不会与柱子共用同一个读数。
+ *
+ * ## 堆叠顺序与配色
+ *
+ * 段按**组合里的有效词条条数**从少到多堆（0 条在最下、4 条在最上），同档内按概率降序；
+ * 颜色同样按条数取 `hitColor(size)`。这样「同一条数 = 同一颜色」在全站成立，
+ * 而且不用看图例就能读出「这截是几条词条凑出来的」。
+ * （参考实现按概率排序、颜色取堆叠序号，颜色在每根柱子里含义都不同，读不出来。）
+ */
+export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
+  const { bars, title, tooltip } = opts;
+  const fit = fitSize(opts.host, SHARED_FIT);
+  const width = opts.width ?? fit.width;
+  const height = opts.height ?? fit.height;
+  const f = frame({
+    width,
+    height,
+    margin: { top: 40, right: 66, bottom: 74, left: 56 },
+    title,
+    ariaLabel: title ?? '胚子质量分布（详细）',
+  });
+
+  if (bars.length === 0) return f.svg;
+
+  // 左轴留 25% 余量给柱顶标签与曲线；曲线按 /1.1 缩放进同一个量纲
+  const axis = niceAxis(Math.max(...bars.map((b) => b.total)) * 1.25, 4);
+  yAxis(f, axis, (v) => pctTick(v, axis.step));
+
+  const bandW = f.plotW / bars.length;
+  const barW = Math.max(2, Math.min(bandW * 0.66, 84));
+  const xOf = (i: number): number => (i + 0.5) * bandW;
+  const yOf = (v: number): number => f.plotH - (v / axis.max) * f.plotH;
+  const yOfCum = (v: number): number => yOf((v / 1.1) * axis.max);
+
+  // --- 累计概率的右侧刻度与虚线 ---
+  for (const [i, b] of bars.entries()) {
+    if (b.atLeast < 0.001) continue;
+    const y = yOfCum(b.atLeast);
+    f.plot.append(
+      el('line', {
+        x1: xOf(i),
+        x2: f.plotW,
+        y1: y,
+        y2: y,
+        class: 'cum-guide',
+      }),
+    );
+    f.plot.append(
+      text(pctTick(b.atLeast, 0.001), {
+        x: f.plotW + 6,
+        y: y + 3.5,
+        'text-anchor': 'start',
+        class: 'cum-label',
+      }),
+    );
+  }
+  f.plot.append(
+    text('累计概率', {
+      x: f.plotW + 6,
+      y: -8,
+      'text-anchor': 'start',
+      class: 'cum-title',
+    }),
+  );
+
+  // --- 柱子：按组合的条数从少到多堆 ---
+  bars.forEach((b, i) => {
+    const segs = [...b.segments].sort((x, y) => x.size - y.size || y.p - x.p);
+    const x = xOf(i);
+    let bottom = 0;
+    for (const s of segs) {
+      if (s.p <= 0) continue;
+      const y0 = yOf(bottom + s.p);
+      const h = yOf(bottom) - y0;
+      f.plot.append(
+        el('rect', {
+          x: x - barW / 2,
+          y: y0,
+          width: barW,
+          height: Math.max(h, 0.6),
+          fill: hitColor(s.size),
+          class: 'bar-seg',
+        }),
+      );
+      // 段内标注是两行（名字 + 概率），所以高度要够两行才画，否则字会压出段外；
+      // 宽度也要够（柱宽只有几十像素）。放不下就交给浮框。
+      // 名字去掉 `+` 两侧的空格：`暴击 + 精通` 会白占两个字符位。
+      const compact = s.label.replace(/ \+ /g, '+');
+      const fits = h >= 23 && compact.length * 9.4 <= barW - 4;
+      if (fits) {
+        f.plot.append(
+          text(compact, { x, y: y0 + h / 2 - 2.5, 'text-anchor': 'middle', class: 'seg-label' }),
+        );
+        f.plot.append(
+          text(pct(s.p, 1), { x, y: y0 + h / 2 + 8, 'text-anchor': 'middle', class: 'seg-pct' }),
+        );
+      }
+      bottom += s.p;
+      void y0;
+    }
+    // 柱顶总概率。**与自己那条累计刻度会挤在一起时不画**：累计曲线是缩放进柱子量纲的，
+    // 概率越小两条标签的竖直间距越小（最后一根柱子上 `柱顶 = 累计`，必然重叠）。
+    const gap = ((b.total - b.total / 1.1) / axis.max) * f.plotH;
+    if (gap >= 12) {
+      f.plot.append(
+        text(pct(b.total, 1), {
+          x,
+          y: yOf(b.total) - 5,
+          'text-anchor': 'middle',
+          class: 'bar-label',
+        }),
+      );
+    }
+  });
+
+  // --- 累计概率折线 ---
+  const cum = bars
+    .map((b, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)},${yOfCum(b.atLeast).toFixed(2)}`)
+    .join(' ');
+  f.plot.append(el('path', { d: cum, class: 'cum-line' }));
+  bars.forEach((b, i) => {
+    f.plot.append(
+      el('rect', {
+        x: xOf(i) - 3,
+        y: yOfCum(b.atLeast) - 3,
+        width: 6,
+        height: 6,
+        transform: `rotate(45 ${xOf(i).toFixed(2)} ${yOfCum(b.atLeast).toFixed(2)})`,
+        class: 'cum-dot',
+      }),
+    );
+  });
+
+  xAxis(
+    f,
+    tickIndices(bars.length, 12).map((i) => ({ x: xOf(i), text: String(bars[i]!.score) })),
+    '胚子得分（分）',
+  );
+  legend(
+    f,
+    [0, 1, 2, 3, 4].map((n) => ({
+      label: n === 0 ? '无有效词条' : `${n} 条有效词条`,
+      color: hitColor(n),
+    })),
+    f.plotH + 46,
+  );
+
+  // --- 悬停：每列一块热区（浏览器做命中测试，不自己换算坐标） ---
+  const guide = el('line', { class: 'guide', y1: 0, y2: f.plotH, x1: -99, x2: -99 });
+  f.plot.append(guide);
+
+  bars.forEach((b, i) => {
+    const x = xOf(i);
+    const hit = el('rect', {
+      x: x - bandW / 2,
+      y: 0,
+      width: Math.max(bandW, 2),
+      height: f.plotH,
+      fill: 'transparent',
+      class: 'hot-rect',
+    });
+    hit.addEventListener('mouseenter', (ev) => {
+      guide.setAttribute('x1', String(x));
+      guide.setAttribute('x2', String(x));
+      guide.classList.add('on');
+      const rows: TooltipRow[] = [...b.segments]
+        .sort((p, q) => q.p - p.p)
+        .map((s) => ({
+          label: s.label,
+          value: pct(s.p, 2),
+          color: hitColor(s.size),
+        }));
+      rows.push({ label: '本分数合计', value: pct(b.total, 2) });
+      tooltip.show(
+        {
+          title: `${b.score} 分`,
+          badge: pct(b.total, 2),
+          rows,
+          footer: `P(得分 ≥ ${b.score}) = ${pct(b.atLeast, 2)}`,
         },
         ev.clientX,
         ev.clientY,
