@@ -28,6 +28,16 @@
   --grid: #e7eaef;
   --axis: #b9c0cc;
   --hot: rgb(37 99 235 / 7%);
+  /* ---- 「词条权重」页的调色板 ----
+     三个部位各一个色相（分类编码：颜色 = 部位），加权重三档的明暗
+     （有序编码：越重越深）。**只给这一页用**，别处仍走 `--accent` 那条单色路线。
+     两头都不走极端：都是中等饱和度的实色，柱内的白字在上面读得清。 */
+  --chart-1: #2563eb; /* 时之沙：蓝（站内主色） */
+  --chart-2: #0d9488; /* 空之杯：青（站内副色 accent-2） */
+  --chart-3: #7c5cd6; /* 理之冠：紫 */
+  --w-150: #1e40af; /* 权重 150：最深 */
+  --w-100: #2563eb;
+  --w-75: #5486d8; /* 权重 75：最浅（仍深到能写白字） */
   --radius: 10px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -53,6 +63,15 @@
   --grid: #232a35;
   --axis: #3a4353;
   --hot: rgb(110 168 254 / 12%);
+  /* 「词条权重」页的调色板：深色主题下换成亮一档的同色相（同一个编码，换个亮度） */
+  --chart-1: #6ea8fe;
+  /* 比 `--accent-2`（#2dd4bf）稍收一点饱和度：三个色相铺成大色块时，
+     最鲜艳的那个会抢视线（作者一贯的要求是「配色两头都不能过」） */
+  --chart-2: #43c8b5;
+  --chart-3: #a78bfa;
+  --w-150: #a8c9ff; /* 权重越大越亮（深色底上「更亮 = 更重」，与浅色主题同一个方向） */
+  --w-100: #6ea8fe;
+  --w-75: #5385c8;
 }
 
 * { box-sizing: border-box; }
@@ -530,6 +549,8 @@ svg.chart text,
 svg.pie text { pointer-events: none; }
 
 .chart-title { fill: var(--text); font-size: 13px; font-weight: 650; }
+/* 标题左边那个小色块：颜色 = 这一张图的主题色（部位），与柱子上的色号同一个来源 */
+.chart-title-chip { rx: 2px; }
 .grid { stroke: var(--grid); stroke-width: 1; }
 .axis-line { stroke: var(--axis); stroke-width: 1; }
 /* 横轴标号（词条名 / 分数）：作者 2026-10-07「太浅/太小，改明显一点」→ 12px + text-dim */
@@ -537,11 +558,15 @@ svg.pie text { pointer-events: none; }
 .axis-title { fill: var(--text-dim); font-size: 11.5px; }
 .legend-label { fill: var(--text-dim); font-size: 11px; }
 
-.bar-seg { transition: opacity .12s; }
-/* 单色柱（主词条概率、副词条权重）：类目之间没有「档」的含义，用一个强调色就够 */
-.bar-seg.bar-plain { fill: var(--accent); }
+.bar-seg { transition: opacity .12s, filter .12s; }
+/* 有主题色的柱子：颜色由调用方给的站内色号（`--chart-*` / `--w-*`）决定，
+   通过 `--bar-fill` 这个自定义属性传进来 —— 不写内联 `fill`，
+   否则下面的 `.bar-off`（被当成主词条那一根）就盖不住它了。 */
+.bar-seg.bar-tone { fill: var(--bar-fill, var(--accent)); }
 /* 被当成主词条的那一根：压暗，但**留在原处**，看得出挑掉的是哪一条 */
 .bar-seg.bar-off { fill: var(--text-faint); opacity: .5; }
+/* 能点的柱子悬停时亮一点：让人看出「这里可以点」 */
+.bar-seg.bar-hover { filter: brightness(1.12) saturate(1.1); }
 .hot-rect { cursor: crosshair; }
 /* 能点的柱子（权重图）：光标换成手，才知道这里可以点 */
 .hot-rect.pickable { cursor: pointer; }

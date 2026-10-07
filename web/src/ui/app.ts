@@ -32,16 +32,23 @@
  */
 
 import {
+  FIXED_MAIN,
   POSITIONS,
   SLOTS,
   SLOT_NAMES,
   SUB_ATTRS,
+  SUB_WEIGHTS,
+  SUB_WEIGHT_SUM,
   GROWTH_ORDER,
   excludedAt,
   excludedSubstat,
   mainAttrsOf,
   mainProbabilities,
+  mainSlotsOf,
+  mainWeightAt,
+  mainWeightSum,
   type MainAttr,
+  type Position,
   type Slot as ArtifactSlot,
   type SubAttr,
 } from '../core/stats';
@@ -1581,6 +1588,24 @@ export function mount(root: HTMLElement): void {
   const WEIGHT_AXIS = 0.16;
 
   /**
+   * 「词条权重」页的色号（颜色本身在 `styles.css` 的调色板里）。
+   *
+   * 三个部位各一个色相 —— 颜色在这里是**分类编码**（哪一张图是哪个部位），
+   * 所以标题左边还会画一块同色的小色块。权重图不用色相，改用**三档明暗**
+   * （越重越深），那是**有序编码**：一眼看出 150 / 100 / 75 这三组。
+   */
+  const MAIN_PROB_TONES: Record<Position, string> = {
+    沙: '--chart-1',
+    杯: '--chart-2',
+    头: '--chart-3',
+  };
+  const WEIGHT_TONES: Record<number, string> = {
+    150: '--w-150',
+    100: '--w-100',
+    75: '--w-75',
+  };
+
+  /**
    * 量一下容器的实际宽度，当画布宽度。
    *
    * 这几张图**必须自己量**：`fitSize` 的 `minW` 是 720，而「词条权重」那三张是并排的，
@@ -1657,17 +1682,26 @@ export function mount(root: HTMLElement): void {
                 renderHistogram({
                   items: data.map((d) => ({ label: d.attr as string, value: d.p })),
                   title: SLOT_NAMES[pos],
+                  // 一个部位一个色相（颜色 = 部位），标题左边那块小色块是它的凭据
+                  tone: MAIN_PROB_TONES[pos],
                   upper: MAIN_PROB_AXIS,
-                  plain: true,
                   width: chartWidth(wrap),
                   height: 230,
                   host: wrap,
                   tooltip: tabCtx.tooltip,
+                  // 图上只有百分比，把官方权重（分子 / 该部位之和）补上 —— 概率就是这两个数之比
+                  tooltipRows: (i) => {
+                    const attr = data[i]!.attr;
+                    const w = mainWeightAt(pos, attr);
+                    return w === undefined
+                      ? []
+                      : [{ label: C.TT_WEIGHT, value: C.weightFraction(w, mainWeightSum(pos)) }];
+                  },
                 }),
               );
             }
 
-            // ② 副词条权重：点柱子 = 把该词条移出池子（再点一次恢复）
+            // ② 副词条权重：点柱子 = 以它为主词条（再点一次恢复）
             const p2 = panel(C.WEIGHTS_TITLE, C.WEIGHTS_HINT);
             p2.box.classList.add('flush');
             const chart = node('div', { class: 'chart-wrap', id: 'weightChart' });
@@ -1677,9 +1711,15 @@ export function mount(root: HTMLElement): void {
 
             function paint(): void {
               const data = substatWeights(excluded ?? undefined);
+              const denom = SUB_WEIGHT_SUM - (excluded ? SUB_WEIGHTS[excluded] : 0);
               chart.replaceChildren(
                 renderHistogram({
-                  items: data.map((d) => ({ label: d.attr, value: d.p })),
+                  items: data.map((d) => ({
+                    label: d.attr,
+                    value: d.p,
+                    // 权重分三档上色（越重越深）：一眼看出「150 / 100 / 75」这三组
+                    tone: WEIGHT_TONES[d.weight] ?? '--w-100',
+                  })),
                   // 权重写在柱子**里面**（作者 2026-10-07：「改为在柱子内显示权重」）——
                   // 它不随点击变（变的是归一化之后的概率）
                   insideLabels: data.map((d) => String(d.weight)),
@@ -1687,11 +1727,29 @@ export function mount(root: HTMLElement): void {
                   dimmedLabel: C.MAIN_STAT_TAG,
                   title: C.weightsChartTitle(excluded),
                   upper: WEIGHT_AXIS,
-                  plain: true,
                   width: chartWidth(chart),
                   height: 260,
                   host: chart,
                   tooltip: tabCtx.tooltip,
+                  // 图上读不到的：这个数是怎么来的（分子 / 分母），以及它能不能当主词条
+                  tooltipRows: (i) => {
+                    const d = data[i]!;
+                    const rows = [
+                      { label: C.TT_WEIGHT, value: C.weightFraction(d.weight, SUB_WEIGHT_SUM) },
+                      {
+                        label: C.TT_MAIN_SLOTS,
+                        value: C.mainSlotsNote(
+                          mainSlotsOf(d.attr).map((s) => SLOT_NAMES[s]),
+                          d.attr === FIXED_MAIN.花 || d.attr === FIXED_MAIN.羽,
+                        ),
+                      },
+                    ];
+                    // 选了主词条之后其余的分母变了（被选中那一根本身不参与归一）
+                    if (excluded && !d.excluded) {
+                      rows.push({ label: C.TT_DENOM, value: C.renormalizeNote(denom) });
+                    }
+                    return rows;
+                  },
                   onPick: (i) => {
                     const attr = data[i]?.attr;
                     if (!attr) return;

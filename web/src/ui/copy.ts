@@ -142,6 +142,37 @@ export function weightsChartTitle(mainAttr: string | null): string {
 }
 /** 被当成主词条那一根上的字（数字位置让给它） */
 export const MAIN_STAT_TAG = '主词条';
+
+// ---------------------------------------------------------------------------
+// 「词条权重」页浮框里的补充行 —— 图上读不到的原始数据
+// ---------------------------------------------------------------------------
+
+/** 「权重 1334 / 5000」：分子分母都摆出来，百分比才算讲清楚来历 */
+export const TT_WEIGHT = '权重';
+export function weightFraction(w: number, sum: number): string {
+  return `${w} / ${sum}`;
+}
+/** 「这个词条能当哪些部位的主词条」 */
+export const TT_MAIN_SLOTS = '主词条';
+/**
+ * 能当主词条时怎么写。
+ *
+ * - 花 / 羽：那一个部位**固定**就是它；
+ * - 一个部位：`时之沙的主词条`；
+ * - 多个部位：`时之沙 / 空之杯 / 理之冠 都能当主词条`；
+ * - **一个都不能**（只有小防御）：`只能当副词条`。
+ */
+export function mainSlotsNote(names: readonly string[], fixed: boolean): string {
+  if (names.length === 0) return '只能当副词条';
+  const joined = names.join(' / ');
+  if (fixed) return `${joined}固定的主词条`;
+  return names.length === 1 ? `${joined}的主词条` : `${joined}都能当主词条`;
+}
+/** 权重图选了主词条之后，其余词条的分母变了 —— 这是「为什么数变了」的答案 */
+export const TT_DENOM = '当前口径';
+export function renormalizeNote(sum: number): string {
+  return `其余按 ${sum} 归一`;
+}
 export const HEAT_TITLE = '给定主词条的副词条概率';
 /**
  * 热力图的口径。

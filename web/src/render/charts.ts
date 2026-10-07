@@ -197,6 +197,13 @@ function frame(opts: {
    * 默认 16：不画标题就不留白；要往右上角放东西的图把它调大。
    */
   header?: number;
+  /**
+   * 标题左边的小色块（一个 CSS 颜色，通常是 `var(--chart-N)`）。
+   *
+   * 给「这张图的主题色是哪一个」一个看得见的凭据：柱子是同一色时，
+   * 标题旁边那块颜色解释了「为什么这几张图颜色不一样」。
+   */
+  titleChip?: string;
   ariaLabel: string;
 }): Frame {
   const { width, height, title, ariaLabel } = opts;
@@ -213,8 +220,21 @@ function frame(opts: {
     'aria-label': ariaLabel,
   });
   if (title) {
+    // 有小色块就把标题右移给它让位。色块的颜色走**内联样式**（`style.fill`）——
+    // `fill="var(--chart-1)"` 这种写法在属性里不解析自定义属性。
+    const shift = opts.titleChip ? 16 : 0;
+    if (opts.titleChip) {
+      const chip = el('rect', { x: margin.left, y: 11, width: 10, height: 10, class: 'chart-title-chip' });
+      chip.style.fill = opts.titleChip;
+      svg.append(chip);
+    }
     svg.append(
-      text(title, { x: margin.left, y: 20, class: 'chart-title', 'text-anchor': 'start' }),
+      text(title, {
+        x: margin.left + shift,
+        y: 20,
+        class: 'chart-title',
+        'text-anchor': 'start',
+      }),
     );
   }
   const plot = el('g', { transform: `translate(${margin.left},${margin.top})` });
@@ -688,7 +708,16 @@ export interface HistogramItem {
   /** 轴上的标号 */
   label: string;
   value: number;
+  /** 写死的颜色（`hitColor` 那套按「命中 N 次」上色的图用）；与 `tone` 二选一 */
   color?: string;
+  /**
+   * 这一根的**主题色号**：站内 CSS 变量的名字（`--chart-2` / `--w-150`）。
+   *
+   * 颜色本身写在 CSS 里（`styles.css` 的调色板），这里只挑色号 ——
+   * 于是深色主题换一组值就跟着走，js 里也不会出现写死的颜色。
+   * 与 `color` 的区别：`tone` 走自定义属性 `--bar-fill`，能被 `.bar-off` 之类的类盖掉。
+   */
+  tone?: string;
 }
 
 export interface HistogramOptions {
@@ -698,17 +727,11 @@ export interface HistogramOptions {
   format?: (v: number) => string;
   /** 纵轴上限；省略则自适应 */
   upper?: number;
-  /**
-   * 单色柱：颜色交给 CSS（`.bar-plain` → `--accent`）。
-   *
-   * 类目之间没有「档」的含义时（主词条概率、副词条权重）用这个 ——
-   * 否则会套上 `hitColor` 那套「命中 N 次」的彩虹色，读起来像加了编码。
-   * 颜色写死在 JS 里就跟不了主题，所以给类名、配色留在 CSS。
-   */
-  plain?: boolean;
+  /** 这张图的主题色号（`--chart-1` …）：当所有柱子的默认色，并画成标题左边的小色块 */
+  tone?: string;
   /**
    * 画在柱子**里面**的注解（如权重）：贴底居中，颜色交给 CSS
-   * （柱身是强调色时写白字、被当成主词条那一根压暗后写深字）。
+   * （柱身是彩色时写白字、被当成主词条那一根压暗后写深字）。
    * 柱子矮到写不下就整根不画 —— 字挤出柱子外比不标更难读。
    */
   insideLabels?: readonly string[];
@@ -725,6 +748,13 @@ export interface HistogramOptions {
    * （权重图那张就是「再点一次恢复」）。
    */
   onPick?: (index: number) => void;
+  /**
+   * 浮框里额外补的行（图上读不到的那些，如原始权重、这个词条能不能当主词条）。
+   *
+   * 浮框的规矩见 `memory.md` §5：**只放图上读不到的**，同一个数只出现一次；
+   * 所以这里只该给「柱高 / 标号 / 柱内注解」之外的量。
+   */
+  tooltipRows?: (index: number) => TooltipRow[];
   /**
    * 纵轴贴着最高的柱子（`tightAxis`）而不是抬到整齐的整数倍上限。
    *
@@ -751,6 +781,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
     height,
     margin: { top: 40, right: 18, bottom: 48, left: 52 },
     title,
+    ...(opts.tone ? { titleChip: `var(${opts.tone})` } : {}),
     ariaLabel: title ?? '分布',
   });
 
@@ -761,26 +792,29 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   yAxis(f, axis, (v) => (opts.format ? format(v) : pctTick(v, axis.step)));
 
   const bandW = f.plotW / items.length;
-  const barW = Math.max(2, Math.min(bandW * 0.62, 76));
+  // 上限 56：柱子细一点、留白多一点，几张图并排时看起来是一套（原来到 76，宽的太宽）
+  const barW = Math.max(2, Math.min(bandW * 0.62, 56));
   const xOf = (i: number): number => (i + 0.5) * bandW;
   const yOf = (v: number): number => f.plotH - (v / axis.max) * f.plotH;
 
+  const bars: SVGRectElement[] = [];
   items.forEach((d, i) => {
     const y = yOf(d.value);
     const off = i === opts.dimmed;
-    const cls = ['bar-seg', opts.plain ? 'bar-plain' : '', off ? 'bar-off' : '']
-      .filter(Boolean)
-      .join(' ');
-    // 单色柱不写 `fill`：交给 CSS 的 `.bar-plain`，主题换了跟着走
+    const tone = d.tone ?? opts.tone;
+    const cls = ['bar-seg', tone ? 'bar-tone' : '', off ? 'bar-off' : ''].filter(Boolean).join(' ');
     const bar = el('rect', {
       x: xOf(i) - barW / 2,
       y,
       width: barW,
       height: Math.max(f.plotH - y, 0.5),
-      ...(opts.plain ? {} : { fill: d.color ?? hitColor(i) }),
+      // 有主题色号就不写内联 `fill`（否则 `.bar-off` 盖不住它）：走自定义属性
+      ...(tone ? {} : { fill: d.color ?? hitColor(i) }),
       rx: 3,
       class: cls,
     });
+    if (tone) bar.style.setProperty('--bar-fill', `var(${tone})`);
+    bars.push(bar);
     f.plot.append(bar);
     f.plot.append(
       text(off ? (opts.dimmedLabel ?? '') : format(d.value), {
@@ -814,6 +848,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 
   items.forEach((d, i) => {
     const x = xOf(i);
+    const bar = bars[i]!;
     const hit = el('rect', {
       x: x - bandW / 2,
       y: 0,
@@ -826,12 +861,14 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
       guide.setAttribute('x1', String(x));
       guide.setAttribute('x2', String(x));
       guide.classList.add('on');
+      // 能点的图：柱子跟着亮一点，光标在哪儿、能点哪个一目了然
+      if (opts.onPick) bar.classList.add('bar-hover');
       tooltip.show(
         {
           // 纵轴就是「概率」，所以数值进 badge，不再另起一行叫「概率」
           title: d.label,
           badge: format(d.value),
-          rows: [],
+          rows: opts.tooltipRows?.(i) ?? [],
         },
         ev.clientX,
         ev.clientY,
@@ -840,6 +877,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
     hit.addEventListener('mousemove', (ev) => tooltip.move(ev.clientX, ev.clientY));
     hit.addEventListener('mouseleave', () => {
       guide.classList.remove('on');
+      bar.classList.remove('bar-hover');
       tooltip.hide();
     });
     if (opts.onPick) {

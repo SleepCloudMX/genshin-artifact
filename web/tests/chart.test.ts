@@ -479,16 +479,91 @@ describe('分类柱状图', () => {
     expect(tt.textContent).not.toContain('说明');
   });
 
-  it('单色柱：不写内联 fill（颜色交给 CSS 的 `--accent`，才跟得了主题）', () => {
+  it('主题色号：不写内联 fill，颜色走 CSS 变量（主题换了跟着走）', () => {
     const svg = renderHistogram({
       items: [{ label: '沙', value: 0.2 }],
-      title: 't',
-      plain: true,
+      title: '时之沙',
+      tone: '--chart-1',
       tooltip: makeTooltip(),
     });
-    const bar = svg.querySelector('rect.bar-seg')!;
+    const bar = svg.querySelector('rect.bar-seg') as SVGRectElement;
     expect(bar.getAttribute('fill')).toBeNull();
-    expect(bar.classList.contains('bar-plain')).toBe(true);
+    expect(bar.classList.contains('bar-tone')).toBe(true);
+    // 色号通过自定义属性传进去（写内联 `fill` 的话 `.bar-off` 就盖不住它了）
+    expect(bar.style.getPropertyValue('--bar-fill')).toBe('var(--chart-1)');
+    // 标题左边那块小色块用的是同一个色号
+    const chip = svg.querySelector('rect.chart-title-chip') as SVGRectElement;
+    expect(chip.style.fill).toBe('var(--chart-1)');
+    // 标题因此右移，不与色块重叠
+    expect(Number(svg.querySelector('text.chart-title')!.getAttribute('x'))).toBeGreaterThan(
+      Number(chip.getAttribute('x')),
+    );
+  });
+
+  it('每一根可以有自己的色号（权重图按 150 / 100 / 75 分三档）', () => {
+    const svg = renderHistogram({
+      items: [
+        { label: '小生命', value: 0.1364, tone: '--w-150' },
+        { label: '暴击', value: 0.0682, tone: '--w-75' },
+      ],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const fills = [...svg.querySelectorAll<SVGRectElement>('rect.bar-seg')].map((b) =>
+      b.style.getPropertyValue('--bar-fill'),
+    );
+    expect(fills).toEqual(['var(--w-150)', 'var(--w-75)']);
+    // 没有色号的图照旧用内联颜色（命中次数那张按「命中 N 次」上色）
+    const plain = renderHistogram({
+      items: [{ label: 'a', value: 0.1 }],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const bar = plain.querySelector('rect.bar-seg')!;
+    expect(bar.getAttribute('fill')).not.toBeNull();
+    expect(bar.classList.contains('bar-tone')).toBe(false);
+  });
+
+  it('能点的柱子：悬停时亮一下（`.bar-hover`），移开复原', () => {
+    const svg = renderHistogram({
+      items: [{ label: 'a', value: 0.1 }],
+      title: 't',
+      tooltip: makeTooltip(),
+      onPick: () => {},
+    });
+    const bar = svg.querySelector('rect.bar-seg')!;
+    const hot = svg.querySelector('rect.hot-rect')!;
+    hot.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(bar.classList.contains('bar-hover')).toBe(true);
+    hot.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    expect(bar.classList.contains('bar-hover')).toBe(false);
+  });
+
+  it('浮框可以补几行图上读不到的（权重、这个词条能不能当主词条）', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(
+      renderHistogram({
+        items: [{ label: '小生命', value: 0.1364 }],
+        title: 't',
+        tooltip,
+        tooltipRows: () => [
+          { label: '权重', value: '150 / 1100' },
+          { label: '主词条', value: '生之花固定的主词条' },
+        ],
+      }),
+    );
+    host
+      .querySelectorAll('rect.hot-rect')[0]!
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    const tt = host.querySelector('.tooltip')!;
+    // 主数值仍然只出现一次（badge 里），补的行不与它重复
+    expect([...tt.querySelectorAll('.tt-row')].map((r) => r.textContent)).toEqual([
+      '权重150 / 1100',
+      '主词条生之花固定的主词条',
+    ]);
+    expect(tt.querySelector('.tt-badge')!.textContent).toBe('13.64%');
   });
 
   it('柱子**里面**的注解（权重）贴底居中，柱子太矮就不画', () => {

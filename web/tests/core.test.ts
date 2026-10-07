@@ -14,10 +14,14 @@ import {
   SLOTS,
   SUB_ATTRS,
   FIXED_MAIN,
+  MAIN_WEIGHTS,
   excludedAt,
   hasRandomMain,
   mainAttrsOf,
   mainProbAt,
+  mainSlotsOf,
+  mainWeightAt,
+  mainWeightSum,
   type MainAttr,
   type SubAttr,
 } from '../src/core/stats';
@@ -442,6 +446,40 @@ describe('部位与主词条', () => {
   it('该部位没有的主词条返回 undefined', () => {
     expect(mainProbAt('沙', '火伤')).toBeUndefined();
     expect(mainProbAt('头', '充能')).toBeUndefined();
+  });
+
+  it('主词条权重之和就是官方数据那张表（沙 5000 / 杯 4000 / 头 50）', () => {
+    // 界面浮框里「权重 1334 / 5000」那条备注用的就是这两个数
+    expect(mainWeightSum('沙')).toBe(5000);
+    expect(mainWeightSum('杯')).toBe(4000);
+    expect(mainWeightSum('头')).toBe(50);
+    // 分子分母之比 == 概率（同一张表，不许两处各算一套）
+    for (const pos of ['沙', '杯', '头'] as const) {
+      for (const [attr, w] of Object.entries(MAIN_WEIGHTS[pos])) {
+        expect(mainProbAt(pos, attr as MainAttr)).toBeCloseTo(
+          (w as number) / mainWeightSum(pos),
+          12,
+        );
+        expect(mainWeightAt(pos, attr as MainAttr)).toBe(w);
+      }
+    }
+    // 这个部位出不来的词条没有权重
+    expect(mainWeightAt('沙', '火伤')).toBeUndefined();
+  });
+
+  it('mainSlotsOf：能当哪些部位的主词条（小防御一个都不能）', () => {
+    // 花 / 羽 的主词条是固定的那一条
+    expect(mainSlotsOf('小生命')).toEqual(['花']);
+    expect(mainSlotsOf('小攻击')).toEqual(['羽']);
+    // 沙 / 杯 / 头 各自专属的几条
+    expect(mainSlotsOf('充能')).toEqual(['沙']);
+    expect(mainSlotsOf('暴击')).toEqual(['头']);
+    expect(mainSlotsOf('治疗')).toEqual(['头']);
+    expect(mainSlotsOf('爆伤')).toEqual(['头']); // 别名也算同一条
+    // 三处都能出的
+    expect(mainSlotsOf('大攻击')).toEqual(['沙', '杯', '头']);
+    // **小防御只能当副词条** —— 它在副词条池里，但哪一件的主词条都不是它
+    expect(mainSlotsOf('小防御')).toEqual([]);
   });
 });
 
