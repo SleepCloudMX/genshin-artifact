@@ -479,17 +479,18 @@ svg.chart { display: block; width: 100%; height: auto; }
 /* 环形图：名字画在图外（画布是横的），百分比画在圆环里，所以比面板窄 */
 .pie-wrap { display: block; }
 .pie-box { display: flex; justify-content: center; }
-svg.pie { width: 100%; max-width: 700px; height: auto; }
+svg.pie { width: 100%; max-width: 720px; height: auto; }
+/* 扇区之间一道背景色细缝。画得细一点：太粗会把极窄的扇区（0.16% 那种）整条吃掉 */
 .pie-slice {
   stroke: var(--bg-elev);
-  stroke-width: .6;
+  stroke-width: .35;
   cursor: pointer;
   transition: opacity .12s;
 }
 svg.pie:has(.pie-slice:hover) .pie-slice { opacity: .45; }
 svg.pie .pie-slice:hover { opacity: 1; }
-/* 摘出来的那一块：描边加深一点，配合外移的缺口一眼可辨 */
-.pie-slice.exploded { stroke: var(--text-faint); stroke-width: .8; }
+/* 摘出来的那一块**只靠外移的缺口**表示，不再描边：
+   那条灰描边在 0.16% 这种极窄扇区上比扇区本身还宽，会把颜色整个盖掉（作者点名）。 */
 .pie-leader { fill: none; stroke: var(--border-strong); stroke-width: .35; }
 .pie-label { fill: var(--text); font-size: 3.2px; }
 .pie-pct { fill: var(--text-dim); font-size: 2.8px; font-family: var(--mono); }

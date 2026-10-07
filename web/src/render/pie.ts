@@ -50,12 +50,15 @@ export interface PieOptions {
 }
 
 const NAMESPACE = 'http://www.w3.org/2000/svg';
-/** 画布是横的：左右各留出名字的位置。片数多时（16 片）标签列会很高，所以画得高一点 */
-const VIEW_W = 184;
-const VIEW_H = 116;
+/**
+ * 画布。**饼画得大、字保持不变**（作者要求）：横竖都按「饼半径 + 图外标签要占的地方」给，
+ * 画布宽度不变时字号也就不变，只有饼变大。
+ */
+const VIEW_W = 196;
+const VIEW_H = 126;
 const CX = VIEW_W / 2;
 const CY = VIEW_H / 2;
-const R = 34;
+const R = 44;
 /** 起点：左上角（与 matplotlib 的 `startangle=140` 同一个位置） */
 const START_DEG = 140;
 /** 摘出来的扇区沿中缝外移多少 */
@@ -65,7 +68,7 @@ const LABEL_R = R + 5;
 /** 圆环里百分比所在半径 */
 const PCT_R = 0.8;
 /** 同侧标签之间的最小竖直间距 */
-const MIN_GAP = 6.4;
+const MIN_GAP = 6.2;
 /** 图外标签是一行还是两行 */
 const LINE_H = 5.2;
 
