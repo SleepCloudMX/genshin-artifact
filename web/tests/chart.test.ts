@@ -650,22 +650,27 @@ describe('质量分布', () => {
     ]);
   });
 
-  it('右轴刻度自己也不叠：末尾两根小柱子的累计值只差几个像素就舍掉后面那个', () => {
-    // 结构用的合成数据：两根小柱子（3% / 1%）在 0.8 的纵轴上几乎贴着底边，
-    // 它们的累计值只差 7px —— 旧版会把 `1.0%` 直接压在 `3.0%` 上。
+  it('右轴刻度自己也不叠：累计值挨得太近就舍掉后面那个', () => {
+    // 结构用的合成数据（合计 100%）：第三根柱子只有 1%，它的累计值（28%）
+    // 与第四根的（27%）在图上只差 4px —— 旧版会把 `27.0%` 直接压在 `28.0%` 上。
+    // 四根的柱顶值都离自己的累计点很远（都 > 11px），所以这一条只考验刻度之间。
     const tail: Bars = [
-      { score: 0, total: 0.5, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.5 }] },
-      { score: 2, total: 0.03, atLeast: 0.03, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.03 }] },
-      { score: 4, total: 0.01, atLeast: 0.01, segments: [{ label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.01 }] },
+      { score: 0, total: 0.4, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.4 }] },
+      { score: 1, total: 0.32, atLeast: 0.6, segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 0.32 }] },
+      { score: 2, total: 0.01, atLeast: 0.28, segments: [{ label: '暴伤', attrs: ['暴伤'], size: 1, p: 0.01 }] },
+      { score: 4, total: 0.27, atLeast: 0.27, segments: [{ label: '精通', attrs: ['精通'], size: 1, p: 0.27 }] },
     ];
     const svg = renderQualityStacked({ bars: tail, tooltip: makeTooltip() });
     expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual([
       '100.0%',
-      '3.0%',
+      '60.0%',
+      '28.0%',
     ]);
   });
 
-  it('柱子特别小时不标：小柱子既没有柱顶值，也不画段内文字', () => {
+  it('柱顶值每根都标：柱子再小也标在柱子上方', () => {
+    // 作者 2026-10-08：「最低那档你为什么不在柱子上方标出概率？标在柱子上方，
+    // 无论柱子有多小，都不可能空间不够。」—— 旧版 0.02 那根顶上什么都没有。
     const mixed: Bars = [
       { score: 0, total: 0.5, atLeast: 1, segments: [{ label: '无有效词条', attrs: [], size: 0, p: 0.5 }] },
       {
@@ -679,11 +684,38 @@ describe('质量分布', () => {
       },
     ];
     const svg = renderQualityStacked({ bars: mixed, tooltip: makeTooltip() });
-    // 只有 50% 那根柱子配得上柱顶值
-    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual(['50.0%']);
-    expect([...svg.querySelectorAll('text.seg-label')].map((n) => n.textContent)).toEqual(['无有效词条']);
-    // 小柱子的柱顶没标，所以它那条累计刻度不必让路，照画
-    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual(['100.0%', '2.0%']);
+    expect([...svg.querySelectorAll('text.bar-label')].map((n) => n.textContent)).toEqual([
+      '50.0%',
+      '2.0%',
+    ]);
+    // 段内文字仍然是「放得下才画」：0.019 那一段高约 13px，写不下名字 + 概率两行
+    expect([...svg.querySelectorAll('text.seg-label')].map((n) => n.textContent)).toEqual([
+      '无有效词条',
+    ]);
+    // 小柱子的柱顶值（2.0%）与它自己的累计刻度（也是 2.0%）几乎贴在一起 → 刻度让路
+    expect([...svg.querySelectorAll('text.cum-label')].map((n) => n.textContent)).toEqual(['100.0%']);
+  });
+
+  it('柱子密到标号摆不开时才不标柱顶值（横向放不下是唯一的例外）', () => {
+    const flat = (n: number): Bars =>
+      Array.from({ length: n }, (_, i) => ({
+        score: i,
+        total: 1 / n,
+        atLeast: 1 - i / n,
+        segments: [{ label: '暴击', attrs: ['暴击'], size: 1, p: 1 / n }],
+      }));
+    // 30 根：柱宽约 30px，「3.3%」这五个字符摆得开
+    expect(
+      renderQualityStacked({ bars: flat(30), tooltip: makeTooltip() }).querySelectorAll(
+        'text.bar-label',
+      ),
+    ).toHaveLength(30);
+    // 60 根：柱宽约 15px，标号会互相压字，只好整张图都不标
+    expect(
+      renderQualityStacked({ bars: flat(60), tooltip: makeTooltip() }).querySelectorAll(
+        'text.bar-label',
+      ),
+    ).toHaveLength(0);
   });
 
   it('段内标注：名字放得下就画（长名字折成两行），概率跟在后面', () => {
