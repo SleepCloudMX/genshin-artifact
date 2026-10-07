@@ -119,7 +119,10 @@ a.icon-btn { text-decoration: none; }
   display: grid;
   /* 左：任务树；中：图表；右：**这个任务的**配置。
      右栏给足 400px（「词条 / 权重 / 初始档位」三列要放得下），不够宽时在
-     1180px 断点整体收成一栏。 */
+     1180px 断点整体收成一栏。
+     **没有配置的任务也占着这一栏的宽度**（作者 2026-10-07：右边没有了配置，
+     空间还是留出来，绘图区看着才协调）—— 所以这里不做 `no-config` 的列数切换，
+     只是把那一栏藏起来（`configHost.hidden`），格子本身留着空。 */
   grid-template-columns: 168px minmax(0, 1fr) 400px;
   gap: 20px;
   align-items: start;
@@ -131,11 +134,8 @@ a.icon-btn { text-decoration: none; }
 .config-col .slot-row.three-col { grid-template-columns: minmax(0, 1fr) 118px 26px; }
 .config-col .slot-head.two-col,
 .config-col .slot-row.two-col { grid-template-columns: minmax(0, 1fr) 118px; }
-/* 不需要配置的任务（「基础概率」：两张表与配置无关）：整栏收掉，把宽度让给图表 */
-.layout.no-config { grid-template-columns: 168px minmax(0, 1fr); }
 @media (max-width: 1180px) {
-  .layout,
-  .layout.no-config { grid-template-columns: minmax(0, 1fr); }
+  .layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (min-width: 1181px) {
   .sticky { position: sticky; top: 16px; }

@@ -7,7 +7,8 @@
  *   - 左：**任务树**（主任务 + 它下面的子任务）；
  *   - 中：结果，顶上一个小标题写着当前任务名，下面按**子 tab** 分页——每张图一个子 tab，
  *     切换即可，不用滚动；
- *   - 右：**这个任务的**配置（`Tab.controls`；不需要配置的任务整栏收掉）。
+ *   - 右：**这个任务的**配置（`Tab.controls`；不需要配置的任务只把这一栏藏起来，
+ *     列宽留着 —— 绘图区在各任务里宽度一致）。
  *
  * ## 为什么配置按 tab 分
  *
@@ -315,7 +316,9 @@ interface Tab {
   /**
    * 右栏：这个任务需要什么配置。
    *
-   * **省略 = 这个任务不需要配置**（如「基础概率」：两张表和配置无关），那一栏整栏收掉。
+   * **省略 = 这个任务不需要配置**（如「基础概率」：两张图和配置无关），
+   * 那一栏藏起来但**列宽留着**（`.layout` 的第三列固定 400px）——
+   * 绘图区宽度在各任务里保持一致，作者要的就是这个「协调」。
    * 配置是任务的属性，所以它跟着任务走，而不是一组全局控件。
    */
   controls?(host: HTMLElement, ctx: TabCtx): void;
@@ -1611,7 +1614,8 @@ export function mount(root: HTMLElement): void {
   const basicTab: Tab = {
     id: 'basic',
     label: C.TAB_BASIC,
-    // **不需要配置**：两张图与配置无关。省略 `controls` → 右栏整栏收掉（见 `selectTab`）。
+    // **不需要配置**：两张图与配置无关。省略 `controls` → 只把右栏藏起来，
+    // 列宽留着（见 `selectTab` 与 `.layout` 的注释）。
 
     mount(host, tabCtx) {
       const panels = node('div', { class: 'subtab-panels' });
@@ -1867,10 +1871,10 @@ export function mount(root: HTMLElement): void {
     const tab = TAB_IMPL[id] ?? growthTab;
     activeTab = tab.id;
 
-    // 配置属于任务：这一栏整体换成当前任务的；**不需要配置的任务整栏收掉**
+    // 配置属于任务：这一栏整体换成当前任务的；**不需要配置的任务只把这一栏藏起来**，
+    // 格子本身留着空 —— 绘图区在各任务里宽度一致，看着才协调（作者 2026-10-07 的要求）。
     configHost.replaceChildren();
     configHost.hidden = tab.controls === undefined;
-    layout.classList.toggle('no-config', tab.controls === undefined);
     tab.controls?.(configHost, ctx);
 
     // 结果面板只挂载一次，之后靠 `hidden` 切换。

@@ -525,7 +525,7 @@ describe('主 tab 与子 tab', () => {
     expect(subs()[0]).toBe(C.SUB_COMBOS);
   });
 
-  it('配置栏在图表**右侧**，且跟着任务走；不需要配置的任务整栏收掉', () => {
+  it('配置栏在图表**右侧**，且跟着任务走；不需要配置的任务只把这一栏藏起来', () => {
     const root = freshRoot();
     mount(root);
     const layout = root.querySelector('.layout')!;
@@ -541,10 +541,13 @@ describe('主 tab 与子 tab', () => {
     clickTab(root, 'quality');
     expect(config.querySelector('#initialVisible')).toBeNull();
     expect(config.querySelector('#qualityRows')).not.toBeNull();
-    // 「基础概率」不需要配置（两张表与配置无关）→ 整栏收掉，宽度让给图表
+    // 「基础概率」不需要配置（两张图与配置无关）→ 把这一栏藏起来。
+    // **但格子留着**（作者 2026-10-07：「空间还是留出来，这样绘图区域看着跟协调」）：
+    // 三栏的列宽由 CSS 定，这里能验的只是那一栏还在、内容空了。
     clickTab(root, 'basic');
     expect(config.hidden).toBe(true);
-    expect(layout.classList.contains('no-config')).toBe(true);
+    expect(config.children).toHaveLength(0);
+    expect(layout.children).toHaveLength(3);
   });
 
   it('得分分布页有五个子 tab，且默认只显示第一个', () => {
