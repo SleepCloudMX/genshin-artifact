@@ -838,6 +838,38 @@ describe('主 tab 与子 tab', () => {
     expect(labels()[0]).toBe('14.63%'); // 150 / 1025
   });
 
+  it('权重图的浮框：**只有两行**，选了主词条之后只换第二行的分母', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    const chart = () => visibleSubPanel(root).querySelector('#weightChart')!;
+    const hover = (i: number): string[] => {
+      const hot = chart().querySelectorAll('rect.hot-rect')[i]!;
+      hot.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      return [...root.querySelectorAll('.tooltip .tt-row')].map((r) => r.textContent!);
+    };
+    const pick = (i: number): void => {
+      chart()
+        .querySelectorAll('rect.hot-rect')
+        [i]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    };
+
+    // 没选主词条：分母是全部权重和
+    expect(hover(0)).toEqual([`${C.TT_WEIGHT}150 / 1100`, `${C.TT_MAIN_SLOTS}生之花固定的主词条`]);
+    // 小防御一个主词条都当不了（界面上自己说清楚，不用等作者答复）
+    expect(hover(2)[1]).toBe(`${C.TT_MAIN_SLOTS}只能当副词条`);
+    expect(hover(6)[1]).toBe(`${C.TT_MAIN_SLOTS}理之冠的主词条`);
+    expect(hover(5)[1]).toBe(`${C.TT_MAIN_SLOTS}时之沙 / 空之杯 / 理之冠都能当主词条`);
+
+    // 以「大攻击」（权重 100）为主词条之后：**行数不变**，第二行的分母 1100 → 1000
+    pick(5);
+    const rows = hover(0);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toBe(`${C.TT_WEIGHT}150 / 1000`);
+    // 被选中那一根仍按 1100 显示它原本的占比（140 行说的「分子 ÷ 分母 = 柱顶那个数」）
+    expect(hover(5)[0]).toBe(`${C.TT_WEIGHT}100 / 1100`);
+  });
+
   it('组合概率：标注画在图上，得分最高的那一项被摘出来', () => {
     const root = freshRoot();
     mount(root);

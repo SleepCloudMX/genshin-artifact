@@ -149,6 +149,13 @@ export const MAIN_STAT_TAG = '主词条';
 
 /** 「权重 1334 / 5000」：分子分母都摆出来，百分比才算讲清楚来历 */
 export const TT_WEIGHT = '权重';
+/**
+ * 分子 / 分母。
+ *
+ * 权重图那张**分母会变**：选了某个词条当主词条之后，其余词条的权重按剩余之和归一
+ * （`1100 − 该主词条的权重`），而被选中那一根仍然按 1100 显示它原本的占比 ——
+ * 所以「分子 ÷ 分母」永远等于柱顶那个数。**不另外加一行解释**（作者要求只两行）。
+ */
 export function weightFraction(w: number, sum: number): string {
   return `${w} / ${sum}`;
 }
@@ -167,11 +174,6 @@ export function mainSlotsNote(names: readonly string[], fixed: boolean): string 
   const joined = names.join(' / ');
   if (fixed) return `${joined}固定的主词条`;
   return names.length === 1 ? `${joined}的主词条` : `${joined}都能当主词条`;
-}
-/** 权重图选了主词条之后，其余词条的分母变了 —— 这是「为什么数变了」的答案 */
-export const TT_DENOM = '当前口径';
-export function renormalizeNote(sum: number): string {
-  return `其余按 ${sum} 归一`;
 }
 export const HEAT_TITLE = '给定主词条的副词条概率';
 /**

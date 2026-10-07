@@ -676,8 +676,12 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .tooltip-host { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
 .tooltip {
   position: fixed;
-  min-width: 150px;
-  max-width: 300px;
+  /* **固定宽度**：内容随悬停对象变（行数、数值长短），宽度一变，
+     `margin-left: auto` 右对齐的数值列就会左右跳 —— 作者 2026-10-07 报的
+     「悬浮框内没有对齐」就是这个（实测同一张图上：窄的浮框 150px、宽的 274px）。
+     280px 能装下最长的那一行（分数 + 占本柱百分比、四词条组合名）。
+     万一还有更长的，数值允许折行（见 `.tt-value`），不会再顶出边框。 */
+  width: 300px;
   padding: 9px 11px;
   background: var(--bg-elev);
   color: var(--text);
@@ -710,7 +714,14 @@ svg.pie .pie-slice:hover { opacity: 1; }
 }
 .tt-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
 .tt-label { color: var(--text-dim); white-space: nowrap; }
-.tt-value { margin-left: auto; font-family: var(--mono); white-space: nowrap; }
+/* 数值右对齐；过长的（如「3.81e-3%（占本柱 0.0806%）」）允许折行 ——
+   浮框宽度是固定的，宁可这一行占两行，也不能顶出边框。 */
+.tt-value {
+  margin-left: auto;
+  font-family: var(--mono);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 /* 浮框内的横排柱状图：一行一根，条长 = 数值 */
 .tt-chart {
   margin-top: 6px;
@@ -722,7 +733,10 @@ svg.pie .pie-slice:hover { opacity: 1; }
 }
 .tt-chart-cap { color: var(--text-faint); font-size: 11px; margin-bottom: 2px; }
 .tt-bar { display: flex; align-items: center; gap: 7px; }
-.tt-bar-label { color: var(--text-dim); white-space: nowrap; flex: none; }
+/* 条名占**固定宽度**：名字长短不一时（「暴击」2 字 vs 「大攻击」3 字），
+   条子与数值的起点才会对齐（作者 2026-10-07 点名的一条）。
+   4.6em = 最长的那一类名字（「命中 2 次」四个字）刚好放下。 */
+.tt-bar-label { color: var(--text-dim); white-space: nowrap; flex: none; width: 4.6em; }
 .tt-bar-track {
   flex: 1 1 auto;
   min-width: 46px;

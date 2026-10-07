@@ -1711,7 +1711,6 @@ export function mount(root: HTMLElement): void {
 
             function paint(): void {
               const data = substatWeights(excluded ?? undefined);
-              const denom = SUB_WEIGHT_SUM - (excluded ? SUB_WEIGHTS[excluded] : 0);
               chart.replaceChildren(
                 renderHistogram({
                   items: data.map((d) => ({
@@ -1731,11 +1730,15 @@ export function mount(root: HTMLElement): void {
                   height: 260,
                   host: chart,
                   tooltip: tabCtx.tooltip,
-                  // 图上读不到的：这个数是怎么来的（分子 / 分母），以及它能不能当主词条
+                  // 图上读不到的：这个数是怎么来的（分子 / 分母），以及它能不能当主词条。
+                  // **只两行**：选了主词条之后不额外加行，只把第二行的分母换成当时那个
+                  // （作者 2026-10-07：「点击后不增加行，只修改第二行 “权重 150 / 1100” 的分母」）——
+                  // 分母就是这一根实际用的那个，所以「分子 ÷ 分母」恒等于柱顶那个数。
                   tooltipRows: (i) => {
                     const d = data[i]!;
-                    const rows = [
-                      { label: C.TT_WEIGHT, value: C.weightFraction(d.weight, SUB_WEIGHT_SUM) },
+                    const denom = SUB_WEIGHT_SUM - (excluded && !d.excluded ? SUB_WEIGHTS[excluded] : 0);
+                    return [
+                      { label: C.TT_WEIGHT, value: C.weightFraction(d.weight, denom) },
                       {
                         label: C.TT_MAIN_SLOTS,
                         value: C.mainSlotsNote(
@@ -1744,11 +1747,6 @@ export function mount(root: HTMLElement): void {
                         ),
                       },
                     ];
-                    // 选了主词条之后其余的分母变了（被选中那一根本身不参与归一）
-                    if (excluded && !d.excluded) {
-                      rows.push({ label: C.TT_DENOM, value: C.renormalizeNote(denom) });
-                    }
-                    return rows;
                   },
                   onPick: (i) => {
                     const attr = data[i]?.attr;
