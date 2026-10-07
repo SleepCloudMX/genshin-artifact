@@ -27,6 +27,9 @@ import {
   nearestIndex,
 } from '../src/render/charts';
 import { renderPie } from '../src/render/pie';
+import { heatColor, inkOf, luminance, renderHeatmap } from '../src/render/heatmap';
+import { OTHER_MAIN, nextSubstatDist, substatHeatmap } from '../src/core/heatmap';
+import { SUB_ATTRS } from '../src/core/stats';
 import { Tooltip } from '../src/render/tooltip';
 import { pctTick } from '../src/ui/format';
 
@@ -844,6 +847,144 @@ describe('组合名的宽度估算与折行', () => {
     expect(wrapCombo('暴击 + 精通 + 大攻击 + 暴伤', 55)).toEqual(['暴击+精通', '大攻击+暴伤']);
     // 折两行还是放不下（词条名太长）→ 交给浮框
     expect(wrapCombo('大攻击 + 暴击 + 暴伤 + 精通', 20)).toBeNull();
+  });
+});
+
+describe('热力图（主词条 × 副词条）', () => {
+  const rows = substatHeatmap();
+  const cols = SUB_ATTRS;
+
+  function cell(svg: SVGSVGElement, row: string, col: string): SVGRectElement {
+    return svg.querySelector<SVGRectElement>(`rect.hm-cell[data-row="${row}"][data-col="${col}"]`)!;
+  }
+
+  it('每格一个矩形 + 一个数值；主词条自己那一格画成空格子', () => {
+    const svg = renderHeatmap({ rows, cols, tooltip: makeTooltip() });
+    // 有值的格子 + 空格子 = 全部格子
+    expect(svg.querySelectorAll('rect.hm-cell')).toHaveLength(rows.length * cols.length);
+    const holes = svg.querySelectorAll('rect.hm-cell.hm-hole');
+    // 9 行是副词条池里的词条（各自少一格）；「其他」一行每格都有概率
+    expect(holes).toHaveLength(9);
+    // 每一格写的就是 core 算出来的那个数（2 位小数）
+    for (const row of rows) {
+      for (const col of cols) {
+        const value = svg.querySelector(`text.hm-value[data-row="${row.key}"][data-col="${col}"]`)!;
+        const p = row.probs.find((d) => d.attr === col)?.p ?? 0;
+        expect(value.textContent, `${row.key} → ${col}`).toBe(
+          p > 0 ? `${(p * 100).toFixed(2)}%` : '—',
+        );
+      }
+    }
+    // 空格子里是破折号，不是 0.00%（注意别用 `not.toContain('0.00%')` 判：
+    // `10.00%` 里就含这个子串，上面按格逐条比对才是准的）
+    expect([...svg.querySelectorAll('text.hm-empty')].map((t) => t.textContent)).toEqual(
+      Array(9).fill('—'),
+    );
+  });
+
+  it('行名与列名都画出来，当前主词条那一行被挑出来（行名上色 + 描一圈）', () => {
+    const svg = renderHeatmap({ rows, cols, highlightRow: '暴伤', tooltip: makeTooltip() });
+    expect([...svg.querySelectorAll('text.hm-row-label')].map((t) => t.textContent)).toEqual(
+      rows.map((r) => r.label),
+    );
+    expect([...svg.querySelectorAll('text.hm-col-label')].map((t) => t.textContent)).toEqual([
+      ...cols,
+    ]);
+    const on = svg.querySelectorAll('text.hm-row-label.on');
+    expect(on).toHaveLength(1);
+    expect(on[0]!.textContent).toBe('暴伤');
+    expect(svg.querySelector('rect.hm-row-box')).not.toBeNull();
+    // 不给 highlightRow 就不画框
+    expect(
+      renderHeatmap({ rows, cols, tooltip: makeTooltip() }).querySelector('rect.hm-row-box'),
+    ).toBeNull();
+  });
+
+  it('悬停某格：浮框给出「再下一条」的横排柱，且写明口径', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(
+      renderHeatmap({
+        rows,
+        cols,
+        nextBars: (row, col) => {
+          const next = nextSubstatDist(row.probe, [col]);
+          const peak = Math.max(...next.map((d) => d.p));
+          return next.map((d) => ({
+            label: d.attr,
+            fraction: d.p / peak,
+            value: `${(d.p * 100).toFixed(2)}%`,
+          }));
+        },
+        nextCaption: '再下一条的概率',
+        tooltip,
+      }),
+    );
+    cell(host.querySelector('svg')!, '大攻击', '暴击').dispatchEvent(
+      new MouseEvent('mouseenter', { bubbles: true }),
+    );
+
+    const tt = host.querySelector('.tooltip')!;
+    expect(tt.querySelector('.tt-title')!.textContent).toBe('大攻击 主词条 · 下一条 暴击');
+    expect(tt.querySelector('.tt-badge')!.textContent).toBe('7.50%');
+    expect(tt.querySelector('.tt-chart-cap')!.textContent).toBe('再下一条的概率');
+    const bars = [...tt.querySelectorAll('.tt-bar')].map((b) => b.textContent);
+    // 暴击已经抽走 → 它不在下一组里；暴伤因为分母小了，比重反而变大
+    expect(bars.some((t) => t!.startsWith('暴击'))).toBe(false);
+    expect(bars.some((t) => t!.startsWith('暴伤'))).toBe(true);
+    // 空格子不给浮框（它没有概率可言）
+    cell(host.querySelector('svg')!, '暴击', '暴击').dispatchEvent(
+      new MouseEvent('mouseenter', { bubbles: true }),
+    );
+    expect(host.querySelector('.tt-badge')!.textContent).toBe('7.50%');
+  });
+
+  it('色标：随概率单调变深，且两端都不走极端（浅格深字 / 深格白字）', () => {
+    // 四个端点
+    expect(heatColor(0)).toBe('#f4f8fc');
+    expect(heatColor(1)).toBe('#32719f');
+    const mid = heatColor(0.5);
+    expect(mid).not.toBe(heatColor(0));
+    expect(mid).not.toBe(heatColor(1));
+    // 中间几档偏浅：数据大多落在 7%~16%，整张图不能发闷
+    expect(luminance(heatColor(0.5))).toBeGreaterThan(0.4);
+    expect(luminance(heatColor(2 / 3))).toBeGreaterThan(0.4);
+    // 单调变深（相邻两档可能被 8 位色深抹平，所以取不严格的不等，另外守住两端确实有差）
+    for (let t = 0; t < 1; t += 0.1) {
+      expect(luminance(heatColor(t))).toBeGreaterThanOrEqual(luminance(heatColor(t + 0.1)));
+    }
+    expect(luminance(heatColor(0))).toBeGreaterThan(luminance(heatColor(1)) + 0.2);
+    // 最浅的一档是浅底深字，最深的一档是深底白字
+    expect(inkOf(heatColor(0))).toBe('#26303d');
+    expect(inkOf(heatColor(1))).toBe('#ffffff');
+    // 越界的 t 不炸
+    expect(heatColor(-1)).toBe(heatColor(0));
+    expect(heatColor(2)).toBe(heatColor(1));
+  });
+
+  it('色标的两端标签都落在画布内（最大值那个曾被右边缘裁掉）', () => {
+    const svg = renderHeatmap({ rows, cols, tooltip: makeTooltip() });
+    const width = Number(svg.getAttribute('viewBox')!.split(' ')[2]);
+    const labels = [...svg.querySelectorAll('text.axis-label')];
+    expect(labels.map((t) => t.textContent)).toEqual(['0%', '15.8%']);
+    const rightMost = Math.max(...labels.map((t) => Number(t.getAttribute('x')))) + 66;
+    expect(rightMost + 34).toBeLessThan(width); // 标签本身还有宽度（约 29）
+    const bars = [...svg.querySelectorAll('rect.hm-legend')];
+    expect(bars.length).toBeGreaterThan(10);
+    const barRight = Math.max(...bars.map((b) => Number(b.getAttribute('x')))) + 66;
+    expect(barRight).toBeLessThan(width);
+  });
+
+  it('每格都带 data-row / data-col（测试与探针靠它定位）', () => {
+    const svg = renderHeatmap({ rows, cols, tooltip: makeTooltip() });
+    expect(cell(svg, '小生命', '暴击')).not.toBeNull();
+    expect(cell(svg, OTHER_MAIN, '精通')).not.toBeNull();
+  });
+
+  it('空数据不抛错', () => {
+    const svg = renderHeatmap({ rows: [], cols, tooltip: makeTooltip() });
+    expect(svg.querySelectorAll('rect.hm-cell')).toHaveLength(0);
   });
 });
 

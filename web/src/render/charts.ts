@@ -684,6 +684,20 @@ export interface HistogramOptions {
   format?: (v: number) => string;
   /** 纵轴上限；省略则自适应 */
   upper?: number;
+  /**
+   * 挑出哪一根（下标）：加一个 `bar-hot` 类，由 CSS 换成强调色。
+   * 用于「当前这一项是哪一个」的图（如当前主词条的概率柱）——
+   * 颜色写死在 JS 里就跟不了主题，所以给类名、配色留在 CSS。
+   */
+  highlight?: number;
+  /**
+   * 纵轴贴着最高的柱子（`tightAxis`）而不是抬到整齐的整数倍上限。
+   *
+   * 两者的差别在「上面空多少」：最高 19.18% 的柱子，`niceAxis` 会给出 30% 的上限
+   * （柱子只占 64% 高度），作者对质量分布图的原话是「按最高的柱子来，比它稍高一点就行」。
+   * 默认仍是 `niceAxis`（命中次数那张图不动）。
+   */
+  tight?: boolean;
   host?: HTMLElement | null;
   width?: number;
   height?: number;
@@ -707,7 +721,7 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   if (items.length === 0) return f.svg;
 
   const max = opts.upper ?? Math.max(...items.map((d) => d.value)) * 1.08;
-  const axis = niceAxis(max, 4);
+  const axis = opts.tight ? tightAxis(max) : niceAxis(max, 4);
   yAxis(f, axis, (v) => (opts.format ? format(v) : pctTick(v, axis.step)));
 
   const bandW = f.plotW / items.length;
@@ -717,17 +731,16 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
 
   items.forEach((d, i) => {
     const y = yOf(d.value);
-    f.plot.append(
-      el('rect', {
-        x: xOf(i) - barW / 2,
-        y,
-        width: barW,
-        height: Math.max(f.plotH - y, 0.5),
-        fill: d.color ?? hitColor(i),
-        rx: 3,
-        class: 'bar-seg',
-      }),
-    );
+    const bar = el('rect', {
+      x: xOf(i) - barW / 2,
+      y,
+      width: barW,
+      height: Math.max(f.plotH - y, 0.5),
+      fill: d.color ?? hitColor(i),
+      rx: 3,
+      class: i === opts.highlight ? 'bar-seg bar-hot' : 'bar-seg',
+    });
+    f.plot.append(bar);
     f.plot.append(
       text(format(d.value), {
         x: xOf(i),

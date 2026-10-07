@@ -112,6 +112,31 @@ export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
+/** 「主词条 · 副词条」：该部位的主词条概率 + 给定主词条后逐条抽副词条的概率（热力图） */
+export const SUB_MAIN_SUB = '主词条 · 副词条';
+
+export function mainProbTitle(slotName: string): string {
+  return `${slotName}的主词条概率`;
+}
+/** 主词条概率是**条件**概率，前提是已经掉到了这个部位（与「该部位的胚子概率」同一口径） */
+export const MAIN_PROB_HINT = '前提是已经掉到了这个部位。';
+export const HEAT_TITLE = '给定主词条的副词条概率';
+/**
+ * 热力图的口径。
+ *
+ * 三件事图上读不出来：
+ *   1. 格子里是**「下一条」**（不是「4 条里含有它」，那个数大得多，在「词条概率」子 tab 里）；
+ *   2. 前两行是花 / 羽 固定的主词条（行名用的是副词条池里的写法）；
+ *   3. 「其他」那一行是什么。
+ */
+export const HEAT_HINT =
+  '格 = 下一条副词条是该词条的概率；悬停看再下一条的分布。' +
+  '小生命 / 小攻击 两行是生之花 / 死之羽 固定的主词条；' +
+  '「其他」= 元素伤害 / 物伤 / 治疗这类只做主词条的词条。';
+export const HEAT_ROW_AXIS = '主词条';
+export const HEAT_COL_AXIS = '副词条';
+/** 浮框里那组横条：它是「再下一条」的条件分布，而且条长按本组最大值折算过 */
+export const HEAT_NEXT_CAPTION = '再下一条的概率（已抽走该词条，条长按本组最大值折算）';
 
 /** 分桶：柱数太多时把相邻分数并成一根柱子 */
 export const BUCKET_LABEL = '分桶';
@@ -245,7 +270,6 @@ export function qualityNote(mainAttr: string, dropped: string | undefined, attrC
 
 export const MORE_TITLE = '待做';
 export const MORE_ITEMS: readonly string[] = [
-  '主词条 → 副词条热力图（数据已备好）',
   '3 / 4 词条混合掉落（比例可配）',
   '图表导出 PNG / SVG',
 ];

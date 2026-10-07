@@ -50,6 +50,8 @@ import {
 
 import baseline from '../src/core/__fixtures__/baseline.json';
 import statsFixture from '../src/core/__fixtures__/stats.json';
+import qualityFixture from '../src/core/__fixtures__/quality.json';
+import { OTHER_MAIN, heatRowKey, nextSubstatDist, substatHeatmap } from '../src/core/heatmap';
 
 const DEAD: SubAttr = '小防御';
 
@@ -704,6 +706,85 @@ describe('成长值口径（四舍五入到两位小数）', () => {
     expect(t.scores[t.scores.length - 1]).toBe(54.5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 逐条抽取（主词条 → 副词条）
+// ---------------------------------------------------------------------------
+describe('逐条抽取的概率（主词条 → 副词条）', () => {
+  it('与归档 `get_sub_probs()` 导出的固件逐格一致', () => {
+    // 固件在 `__fixtures__/quality.json` 的 `heatmap` 段，由 `tools/gen_fixtures.py quality`
+    // 从归档实现导出 —— 这张图的口径就是照它抄的，所以这里逐格对拍。
+    const byKey = new Map(substatHeatmap().map((r) => [r.key, r]));
+    expect(qualityFixture.heatmap.length).toBeGreaterThan(0);
+    for (const f of qualityFixture.heatmap) {
+      const row = byKey.get(f.mainAttr);
+      expect(row, `缺少「${f.mainAttr}」这一行`).toBeDefined();
+      const got = new Map(row!.probs.map((d) => [d.attr as string, d.p]));
+      // 主词条自己那一格两边都不出现（不是 0，是「没有这一项」）
+      expect([...got.keys()].sort()).toEqual(Object.keys(f.probs).sort());
+      for (const [attr, p] of Object.entries(f.probs)) {
+        expect(got.get(attr), `${f.mainAttr} → ${attr}`).toBeCloseTo(p, 12);
+      }
+      // 每一行的概率之和恒为 1
+      expect(row!.probs.reduce((s, d) => s + d.p, 0)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('参考图上的三个数：主词条小生命 → 小攻击 15.79%、暴击主词条 → 暴伤 7.32%、其他 → 暴击 6.82%', () => {
+    // 15/95 = 15.79%（主词条小生命把权重 150 从 1100 里扣掉）
+    expect(rowProb('小生命', '小攻击')).toBeCloseTo(0.15789473684210525, 12);
+    expect(rowProb('暴击', '暴伤')).toBeCloseTo(75 / 1025, 12);
+    expect(rowProb(OTHER_MAIN, '暴击')).toBeCloseTo(75 / 1100, 12);
+  });
+
+  it('行是按「能当主词条的词条」列的：小防御不在其中，「其他」收元素伤害那类', () => {
+    const keys = substatHeatmap().map((r) => r.key);
+    expect(keys).toEqual([
+      '小生命', '小攻击', '大生命', '大防御', '大攻击', '暴击', '暴伤', '充能', '精通', OTHER_MAIN,
+    ]);
+    // 小防御只能当副词条，永远不会出现在行里
+    expect(keys).not.toContain('小防御');
+  });
+
+  it('下一条：加权不放回（抽走的词条不再出现，分母也少掉它的权重）', () => {
+    const first = nextSubstatDist('火伤');
+    expect(first.find((d) => d.attr === '暴击')!.p).toBeCloseTo(75 / 1100, 12);
+
+    const second = nextSubstatDist('火伤', ['暴击']);
+    expect(second.find((d) => d.attr === '暴击')).toBeUndefined();
+    // 分母 1100 − 75 = 1025：暴伤的概率比第一条时高
+    expect(second.find((d) => d.attr === '暴伤')!.p).toBeCloseTo(75 / 1025, 12);
+    expect(second.find((d) => d.attr === '暴伤')!.p).toBeGreaterThan(
+      first.find((d) => d.attr === '暴伤')!.p,
+    );
+    expect(second.reduce((s, d) => s + d.p, 0)).toBeCloseTo(1, 12);
+  });
+
+  it('主词条自己永远不出现在「下一条」里（别名也算同一条）', () => {
+    for (const row of substatHeatmap()) {
+      for (const d of row.probs) expect(d.attr).not.toBe(row.mainAttr);
+    }
+    // 爆伤 / 暴伤 是同一条
+    expect(nextSubstatDist('爆伤').map((d) => d.attr)).not.toContain('暴伤');
+    // 重复的已抽走词条只扣一次权重
+    const dup = nextSubstatDist('火伤', ['暴击', '暴击']);
+    expect(dup.reduce((s, d) => s + d.p, 0)).toBeCloseTo(1, 12);
+    expect(dup.find((d) => d.attr === '暴伤')!.p).toBeCloseTo(75 / 1025, 12);
+  });
+
+  it('heatRowKey：副词条池里的词条归到自己那一行，元素伤害那类归「其他」', () => {
+    expect(heatRowKey('小生命')).toBe('小生命');
+    expect(heatRowKey('爆伤')).toBe('暴伤');
+    expect(heatRowKey('火伤')).toBe(OTHER_MAIN);
+    expect(heatRowKey('治疗')).toBe(OTHER_MAIN);
+  });
+});
+
+/** 某一行里某个副词条的概率 */
+function rowProb(main: string, attr: SubAttr): number {
+  const row = substatHeatmap().find((r) => r.key === main)!;
+  return row.probs.find((d) => d.attr === attr)!.p;
+}
 
 // ---------------------------------------------------------------------------
 // 归档交叉验证

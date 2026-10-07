@@ -31,11 +31,14 @@ import {
   GROWTH_ORDER,
   excludedAt,
   excludedSubstat,
+  hasRandomMain,
   mainAttrsOf,
+  mainProbabilities,
   type MainAttr,
   type Slot as ArtifactSlot,
   type SubAttr,
 } from '../core/stats';
+import { heatRowKey, nextSubstatDist, substatHeatmap } from '../core/heatmap';
 import {
   BUCKET_OPTIONS,
   bucketize,
@@ -66,12 +69,13 @@ import {
   renderSurvival,
   renderHistogram,
   renderQualityStacked,
+  categoricalColor,
   hitColor,
   type QualityBar,
 } from '../render/charts';
 import { renderPie } from '../render/pie';
-import { Tooltip } from '../render/tooltip';
-import {
+import { renderHeatmap } from '../render/heatmap';
+import { Tooltip } from '../render/tooltip';import {
   CANONICAL_WEIGHT,
   QUALITY_WEIGHT,
   QUALITY_WEIGHT_STEP,
@@ -1488,6 +1492,78 @@ export function mount(root: HTMLElement): void {
                 .map((a) =>
                   row([a.attr, pct(a.p), String(weights[a.attr] ?? 0), a.p > 0 ? oneIn(1 / a.p) : '—']),
                 ),
+            );
+          },
+        },
+        {
+          /**
+           * 「主词条 · 副词条」：**掉落是怎么抽出来的**。
+           *
+           * 上半张 = 该部位的主词条概率（已经掉到该部位的前提下）；
+           * 下半张 = 参考 `主词条-副词条.png` 的热力图，行是主词条、列是副词条，
+           * 格子里是「下一条副词条是该词条」的概率（热力图那套逐条抽取的口径，
+           * 不是「词条概率」子 tab 的「4 条里含有它」——两者数值差好几倍）。
+           *
+           * 悬停某格给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
+           */
+          label: C.SUB_MAIN_SUB,
+          render(box) {
+            // ① 该部位的主词条概率：当前那一条挑出来上色
+            // 花 / 羽 的主词条固定（概率 1），没有主词条概率表，单独给一根 100% 的柱子
+            const slot = state.slot;
+            const fixed = !hasRandomMain(slot);
+            const probs = hasRandomMain(slot)
+              ? mainProbabilities(slot).sort((a, b) => b.p - a.p)
+              : [{ attr: mainAttrsOf(slot)[0]!, p: 1 }];
+            const current = probs.findIndex((d) => d.attr === state.mainAttr);
+            const p1 = panel(C.mainProbTitle(SLOT_NAMES[state.slot]), C.MAIN_PROB_HINT);
+            p1.box.classList.add('flush');
+            const chart1 = node('div', { class: 'chart-wrap', id: 'mainProbChart' });
+            p1.body.append(chart1);
+            box.append(p1.box);
+            chart1.append(
+              renderHistogram({
+                items: probs.map((d) => ({ label: d.attr, value: d.p, color: categoricalColor(0) })),
+                ...(!fixed && current >= 0 ? { highlight: current } : {}),
+                // 纵轴贴着最高的柱子：这些概率大多在 20% 上下，按整齐上限会抬到 30%，
+                // 柱子上方空一大截（作者对质量分布提过同一条）
+                tight: true,
+                host: chart1,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+
+            // ② 热力图
+            const rows = substatHeatmap();
+            const p2 = panel(C.HEAT_TITLE, C.HEAT_HINT);
+            p2.box.classList.add('flush');
+            const chart2 = node('div', { class: 'chart-wrap', id: 'substatHeatmap' });
+            p2.body.append(chart2);
+            box.append(p2.box);
+            chart2.append(
+              renderHeatmap({
+                rows,
+                cols: SUB_ATTRS,
+                highlightRow: heatRowKey(state.mainAttr),
+                // 浮框里的条：把「这一格已经抽走」代进模型，得到再下一条的分布。
+                // 条长按本组最大值折算（这几个概率都在 10% 上下，按原值画全是一小截），
+                // 所以 `nextCaption` 必须写明这件事。
+                nextBars: (row, col) => {
+                  const next = nextSubstatDist(row.probe, [col]);
+                  const peak = Math.max(...next.map((d) => d.p));
+                  return next.map((d) => ({
+                    label: d.attr,
+                    fraction: d.p / peak,
+                    value: pct(d.p, 2),
+                    color: categoricalColor(0),
+                  }));
+                },
+                nextCaption: C.HEAT_NEXT_CAPTION,
+                rowAxis: C.HEAT_ROW_AXIS,
+                colAxis: C.HEAT_COL_AXIS,
+                host: chart2,
+                tooltip: tabCtx.tooltip,
+              }),
             );
           },
         },

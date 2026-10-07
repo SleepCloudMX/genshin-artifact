@@ -657,11 +657,16 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelectorAll('[data-tab="more"] ul.todo li').length).toBeGreaterThan(0);
   });
 
-  it('胚子质量页有三个子 tab，「组合概率」在第一个', () => {
+  it('胚子质量页有四个子 tab，「组合概率」在第一个', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    expect(subLabels(root)).toEqual([C.SUB_COMBOS, C.SUB_QUALITY_DIST, C.SUB_ATTRS]);
+    expect(subLabels(root)).toEqual([
+      C.SUB_COMBOS,
+      C.SUB_QUALITY_DIST,
+      C.SUB_ATTRS,
+      C.SUB_MAIN_SUB,
+    ]);
     // 默认只渲染第一个：组合概率的饼
     expect(visibleSubPanel(root).querySelectorAll('svg.pie path.pie-slice').length).toBeGreaterThan(0);
 
@@ -672,6 +677,10 @@ describe('主 tab 与子 tab', () => {
 
     clickSub(root, C.SUB_ATTRS);
     expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);
+
+    clickSub(root, C.SUB_MAIN_SUB);
+    expect(visibleSubPanel(root).querySelector('#mainProbChart svg')).not.toBeNull();
+    expect(visibleSubPanel(root).querySelector('#substatHeatmap svg')).not.toBeNull();
   });
 
   it('组合概率：标注画在图上，得分最高的那一项被摘出来', () => {
@@ -898,6 +907,57 @@ describe('主 tab 与子 tab', () => {
     expect(chart.querySelectorAll('text.cum-label')).toHaveLength(0);
     // 柱子还在
     expect(chart.querySelectorAll('rect.bar-seg').length).toBeGreaterThan(0);
+  });
+
+  it('「主词条 · 副词条」：该部位的主词条概率 + 热力图，当前主词条那一行被挑出来', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    clickSub(root, C.SUB_MAIN_SUB);
+    const panel = visibleSubPanel(root);
+
+    // ① 空之杯有 12 个主词条各一根柱子，其中恰好一根是「当前主词条」
+    const bars = [...panel.querySelectorAll<SVGRectElement>('#mainProbChart rect.bar-seg')];
+    expect(bars).toHaveLength(12);
+    const hot = panel.querySelectorAll('#mainProbChart rect.bar-seg.bar-hot');
+    expect(hot).toHaveLength(1);
+    // 挑出来的那根就是「火伤」那根（柱心与轴标同一个 x）
+    const fire = [...panel.querySelectorAll('#mainProbChart text.axis-label')].find(
+      (t) => t.textContent === '火伤',
+    )!;
+    const bar = hot[0]!;
+    expect(Number(bar.getAttribute('x')) + Number(bar.getAttribute('width')) / 2).toBeCloseTo(
+      Number(fire.getAttribute('x')),
+      6,
+    );
+
+    // ② 热力图：10 行（能当主词条的词条 + 其他）× 10 列（副词条）
+    expect(panel.querySelectorAll('#substatHeatmap rect.hm-cell')).toHaveLength(100);
+    const on = panel.querySelectorAll('#substatHeatmap text.hm-row-label.on');
+    expect(on).toHaveLength(1);
+    // 火伤不在副词条池里 → 归到「其他」那一行
+    expect(on[0]!.textContent).toBe('其他');
+  });
+
+  it('「主词条 · 副词条」跟着主词条走；花 / 羽 只有一根 100% 的柱子', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'quality');
+    clickSub(root, C.SUB_MAIN_SUB);
+
+    // 换到理之冠 + 暴击：高亮行跟着换，主词条概率表也换成头那 7 条
+    pickSlotAndMain(root, '头', '暴击');
+    const panel = () => visibleSubPanel(root);
+    expect(panel().querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe('暴击');
+    expect(panel().querySelectorAll('#mainProbChart rect.bar-seg')).toHaveLength(7);
+
+    // 花：主词条固定，只有一根 100% 的柱子，且不高亮（没有第二个选项）
+    pickSlotAndMain(root, '花', '小生命');
+    expect(panel().querySelectorAll('#mainProbChart rect.bar-seg')).toHaveLength(1);
+    expect(panel().querySelectorAll('#mainProbChart rect.bar-seg.bar-hot')).toHaveLength(0);
+    expect(panel().querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe(
+      '小生命',
+    );
   });
 
   it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {
