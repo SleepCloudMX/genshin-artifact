@@ -703,7 +703,7 @@ describe('主 tab 与子 tab', () => {
   it('「更多 / 待做」整页删掉：待做不属于网页', () => {
     const root = freshRoot();
     mount(root);
-    // 作者 2026-10-08：「“更多” 删了，这页没用。待做也不应该放在网页里。」
+    // 作者 2026-10-07：「“更多” 删了，这页没用。待做也不应该放在网页里。」
     expect(root.querySelector('#tab-more')).toBeNull();
     expect(root.querySelector('[data-tab="more"]')).toBeNull();
     expect(root.querySelector('ul.todo')).toBeNull();
@@ -1206,7 +1206,7 @@ describe('页面文案', () => {
   it('标题下那句「计算胚子练满 +20 …」和两页的说明句都删了', () => {
     const root = freshRoot();
     mount(root);
-    // 作者 2026-10-08：「删了，废话」/「删了，莫名其妙，这跟强化不强化压根就没关系」
+    // 作者 2026-10-07：「删了，废话」/「删了，莫名其妙，这跟强化不强化压根就没关系」
     expect(root.querySelector('.hero .lede')).toBeNull();
     expect(root.querySelector('.tab-blurb')).toBeNull();
     expect(root.querySelector('.hero')!.textContent).not.toContain('计算胚子练满');
