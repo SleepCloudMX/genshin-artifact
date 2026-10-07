@@ -162,6 +162,12 @@ a.icon-btn { text-decoration: none; }
 /* 结果栏是弹性列：子 tab 面板可以撑开，图就不必挤在顶部留一大片空白 */
 .results { display: flex; flex-direction: column; }
 
+/* 配置栏比另外两栏**低一行**（作者 2026-10-08：「配置那个模块，往下移一点吧。
+   不超过子任务（如 “胚子质量”）」）—— 与任务树第一项（「得分分布」）的下沿对齐：
+   那一项 33px + 组内间距 2px + 子列表上边距 2px = 37px。
+   **上限就是树里的第二项**（现在默认全展开，正好是「胚子质量」那一行），别再往下加。 */
+.config-col { margin-top: 37px; }
+
 .panel {
   background: var(--bg-elev);
   border: 1px solid var(--border);
