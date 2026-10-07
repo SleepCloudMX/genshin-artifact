@@ -777,15 +777,21 @@ svg.pie .pie-slice:hover { opacity: 1; }
 
 /* ---------- 热力图（主词条 × 副词条） ---------- */
 /* 格子的底色是算出来的（`render/heatmap.ts` 的三档蓝色梯度），文字颜色按格的
-   亮度翻转：浅格深字、深格白字，所以这里只定字号，不定颜色。 */
-.hm-value { font-size: 10px; font-family: var(--mono); }
+   亮度翻转：浅格深字、深格白字，所以这里只定字号，不定颜色。
+   **字号 2026-10-08 整体调大一档**（作者：格内的数值与横纵轴的词条属性都要大一点）：
+   数值 10 → 12、行名/列名 10.5 → 12、轴名 11.5 → 12.5。
+   调这几个字号时记得同步 `render/heatmap.ts` 里的居中偏移（`+ 4.2`）与色标右侧的
+   宽度估算（`textWidth(maxLabel, 12)`）—— 它们都按字号写死。 */
+.hm-value { font-size: 12px; font-family: var(--mono); }
 .hm-cell { transition: opacity .12s; }
 .hm-cell:hover { opacity: .82; }
 /* 主词条自己那一格：不可能事件，画成空格子 */
 .hm-cell.hm-hole { fill: var(--bg-soft); stroke: var(--border); stroke-width: .5; stroke-dasharray: 2 2; }
 .hm-value.hm-empty { fill: var(--text-faint); }
-.hm-row-label { fill: var(--text-dim); font-size: 10.5px; }
-.hm-col-label { fill: var(--text-dim); font-size: 10.5px; }
+.hm-row-label { fill: var(--text-dim); font-size: 12px; }
+.hm-col-label { fill: var(--text-dim); font-size: 12px; }
+/* 这张图的轴名（「主词条」「副词条」）：只放大这一张，不动全局的 `.axis-title` */
+.chart.heatmap .hm-axis-title { fill: var(--text-dim); font-size: 12.5px; }
 .hm-legend { shape-rendering: crispEdges; }
 
 /* ---------- 表格 ---------- */

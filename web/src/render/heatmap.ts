@@ -20,6 +20,15 @@ import type { SubAttr } from '../core/stats';
 import { fitSize, inkOn, luminance, rampColor, textWidth } from './charts';
 import type { Tooltip, TooltipBar } from './tooltip';
 
+/**
+ * 格子那行数字的**光学居中**偏移。
+ *
+ * 字号写在 CSS 的 `.hm-value`（12px）里 —— 改字号就得改这个数，两者是一对（12px ≈ 0.35em）。
+ */
+const TEXT_MID = 4.2;
+/** 色标两端标签的字号：与 CSS 的 `.axis-label` 一致（估宽度要用） */
+const AXIS_LABEL_SIZE = 12;
+
 const NAMESPACE = 'http://www.w3.org/2000/svg';
 
 function el<K extends keyof SVGElementTagNameMap>(
@@ -96,7 +105,9 @@ export interface HeatmapOptions {
 
 export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
   const { rows, cols, tooltip } = opts;
-  const fit = fitSize(opts.host, { ratio: opts.ratio ?? 0.44, minH: 340, maxH: 620 });
+  // 0.52（原来是 0.44）：**格子要更大**（作者 2026-10-08）—— 宽度由面板定死，
+  // 只能靠高度把格子撑开，于是字号一调大，格子也跟着高了一档
+  const fit = fitSize(opts.host, { ratio: opts.ratio ?? 0.52, minH: 360, maxH: 660 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
 
@@ -108,7 +119,8 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
     'aria-label': opts.title ?? '主词条与副词条的概率',
   });
 
-  const margin = { top: 40, right: 16, bottom: 46, left: 66 };
+  // 左边距要容下「行名（3 个字）+ 竖排轴名」，右边只留一点（格子越宽越好）
+  const margin = { top: 38, right: 10, bottom: 46, left: 64 };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
   if (opts.title) {
@@ -149,7 +161,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
         plot.append(
           text(`${(p * 100).toFixed(2)}%`, {
             x: x + cellW / 2,
-            y: y + cellH / 2 + 3.5,
+            y: y + cellH / 2 + TEXT_MID,
             'text-anchor': 'middle',
             class: 'hm-value',
             fill: inkOn(fill),
@@ -164,7 +176,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
         plot.append(
           text('—', {
             x: x + cellW / 2,
-            y: y + cellH / 2 + 3.5,
+            y: y + cellH / 2 + TEXT_MID,
             'text-anchor': 'middle',
             class: 'hm-value hm-empty',
             'data-row': row.key,
@@ -197,7 +209,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
     plot.append(
       text(row.label, {
         x: -10,
-        y: y + cellH / 2 + 3.5,
+        y: y + cellH / 2 + TEXT_MID,
         'text-anchor': 'end',
         class: 'hm-row-label',
         'data-row': row.key,
@@ -210,7 +222,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
     plot.append(
       text(col, {
         x: j * cellW + cellW / 2,
-        y: plotH + 16,
+        y: plotH + 18,
         'text-anchor': 'middle',
         class: 'hm-col-label',
       }),
@@ -221,9 +233,9 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
     plot.append(
       text(opts.colAxis, {
         x: plotW / 2,
-        y: plotH + 36,
+        y: plotH + 40,
         'text-anchor': 'middle',
-        class: 'axis-title',
+        class: 'axis-title hm-axis-title',
       }),
     );
   }
@@ -234,7 +246,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
         y: plotH / 2,
         'text-anchor': 'middle',
         transform: `rotate(-90 -56 ${plotH / 2})`,
-        class: 'axis-title',
+        class: 'axis-title hm-axis-title',
       }),
     );
   }
@@ -244,7 +256,7 @@ export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
   const legendW = 90;
   const legendY = -24;
   const maxLabel = `${(maxP * 100).toFixed(1)}%`;
-  const barRight = plotW - textWidth(maxLabel, 10.5) - 6;
+  const barRight = plotW - textWidth(maxLabel, AXIS_LABEL_SIZE) - 6;
   const barLeft = barRight - legendW;
   for (let k = 0; k < legendW; k++) {
     plot.append(
