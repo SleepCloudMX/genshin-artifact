@@ -22,12 +22,16 @@ import {
   wrapCombo,
   niceAxis,
   tightAxis,
-  lighten,
+  BLUE_RAMP,
+  inkOn,
+  luminance,
+  rampColor,
+  segmentColor,
   tickIndices,
   nearestIndex,
 } from '../src/render/charts';
 import { renderPie } from '../src/render/pie';
-import { heatColor, inkOf, luminance, renderHeatmap } from '../src/render/heatmap';
+import { heatColor, inkOf, renderHeatmap } from '../src/render/heatmap';
 import { OTHER_MAIN, nextSubstatDist, substatHeatmap } from '../src/core/heatmap';
 import { SUB_ATTRS } from '../src/core/stats';
 import { Tooltip } from '../src/render/tooltip';
@@ -91,12 +95,17 @@ describe('坐标轴工具', () => {
     expect(Number.isFinite(tightAxis(0).max)).toBe(true);
   });
 
-  it('lighten 把颜色调浅（段渐变的浅端），非 #rrggbb 原样返回', () => {
-    expect(lighten('#000000', 0.5)).toBe('#808080');
-    expect(lighten('#ffffff', 0.5)).toBe('#ffffff');
-    // 只动往白的方向，不会有变暗的分支
-    expect(lighten('#8cb8d7', 0.45)).not.toBe('#8cb8d7');
-    expect(lighten('red', 0.5)).toBe('red');
+  it('rampColor 是浅到深的单色相蓝，越界不炸', () => {
+    expect(rampColor(0)).toBe(BLUE_RAMP[0]);
+    expect(rampColor(1)).toBe(BLUE_RAMP[BLUE_RAMP.length - 1]);
+    // 单调变深
+    for (let t = 0; t < 1; t += 0.1) {
+      expect(luminance(rampColor(t))).toBeGreaterThanOrEqual(luminance(rampColor(t + 0.1)));
+    }
+    expect(luminance(rampColor(0))).toBeGreaterThan(luminance(rampColor(1)) + 0.2);
+    // 越界的 t 夹到两端
+    expect(rampColor(-1)).toBe(rampColor(0));
+    expect(rampColor(2)).toBe(rampColor(1));
   });
 
   it('tickIndices 最多 maxLabels 个，且含首尾', () => {
@@ -517,49 +526,36 @@ describe('质量分布', () => {
     },
   ];
 
-  /** `url(#qseg3-2)` → 2（这一段的序位）；颜色在盘里就是按它取的 */
-  function gradientIndex(fill: string | null): number {
-    const m = /^url\(#qseg\d+-(\d)\)$/.exec(fill ?? '');
-    if (!m) throw new Error(`不是渐变填充：${fill}`);
-    return Number(m[1]);
-  }
-
   /** 三个通道之和，只用来比较「谁更浅」 */
   function brightness(hex: string): number {
     return [1, 3, 5].reduce((s, i) => s + parseInt(hex.slice(i, i + 2), 16), 0);
   }
 
-  it('每根柱子按组合拆成多段，段色按堆叠顺序取（同一根柱子里的段必定不同色）', () => {
+  it('一列的段由浅到深渐变，**段内是纯色**（作者：渐变是段与段之间的事）', () => {
     const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
     const fills = [...svg.querySelectorAll('rect.bar-seg')].map((r) => r.getAttribute('fill'));
     expect(fills).toHaveLength(6);
-    // 每根柱子从第 0 号渐变开始：一根段、三段、一根段、一根段
-    expect(fills.map(gradientIndex)).toEqual([0, 0, 1, 2, 0, 0]);
-    // 跨柱子不复用同一套编码：同一段序位在两根柱子里都出现了（作者说不需要区分）
-    expect(new Set(fills).size).toBeLessThan(fills.length);
-  });
-
-  it('段用渐变色：每段一条竖向渐变，上端浅、下端是该段的本色', () => {
-    const svg = renderQualityStacked({ bars, tooltip: makeTooltip() });
-    const defs = svg.querySelectorAll('defs linearGradient');
-    // 段数最多的那根柱子有 3 段 → 只需要 3 条渐变
-    expect(defs).toHaveLength(3);
-    defs.forEach((g, k) => {
-      expect(g.getAttribute('id')).toMatch(new RegExp(`-${k}$`));
-      // 竖向：x1=x2、y1=0、y2=1
-      expect(g.getAttribute('x1')).toBe(g.getAttribute('x2'));
-      expect(g.getAttribute('y2')).toBe('1');
-      const stops = [...g.querySelectorAll('stop')].map((s) => s.getAttribute('stop-color')!);
-      expect(stops).toHaveLength(2);
-      // 下端就是分类色盘里那一个（浮框色块与图上对得上），上端是它的浅色调
-      expect(stops[1]).toBe(categoricalColor(k));
-      expect(brightness(stops[0]!)).toBeGreaterThan(brightness(stops[1]!));
-    });
-    // 图上每一段都指向一条渐变，而不是纯色
-    for (const r of svg.querySelectorAll('rect.bar-seg')) {
-      const id = /^url\(#(.+)\)$/.exec(r.getAttribute('fill')!)![1]!;
-      expect(svg.querySelector(`linearGradient[id="${id}"]`)).not.toBeNull();
+    // 一根段、三段、一根段、一根段：每列都按 (k+1)/(n+1) 取色标
+    expect(fills).toEqual([
+      segmentColor(0, 1),
+      segmentColor(0, 3),
+      segmentColor(1, 3),
+      segmentColor(2, 3),
+      segmentColor(0, 1),
+      segmentColor(0, 1),
+    ]);
+    // 段内纯色：没有渐变引用，也没有 defs
+    for (const f of fills) expect(f).toMatch(/^#[0-9a-f]{6}$/);
+    expect(svg.querySelectorAll('defs, linearGradient')).toHaveLength(0);
+    // 一列里由下到上越来越深
+    const three = fills.slice(1, 4);
+    for (let i = 1; i < three.length; i++) {
+      expect(brightness(three[i]!), `第 ${i} 段应当比下一段深`).toBeLessThan(
+        brightness(three[i - 1]!),
+      );
     }
+    // 单段的一列取色标正中那档，不会淡成一片白
+    expect(luminance(segmentColor(0, 1))).toBeLessThan(luminance(segmentColor(0, 3)));
   });
 
   it('纵轴贴着最高的柱子（不再固定到 40% 那种整齐上限）', () => {
@@ -746,7 +742,7 @@ describe('质量分布', () => {
     expect(host.querySelector('.tooltip')!.textContent).not.toContain('累计概率');
   });
 
-  it('勾选的词条：命中的段挑出来，其余压暗', () => {
+  it('勾选的词条：命中的段换成暖橙，其余压暗（不再描黑边）', () => {
     const svg = renderQualityStacked({ bars, highlight: ['暴击'], tooltip: makeTooltip() });
     const hits = svg.querySelectorAll('rect.bar-seg.seg-hit');
     const dim = svg.querySelectorAll('rect.bar-seg.seg-dim');
@@ -755,6 +751,50 @@ describe('质量分布', () => {
     expect(hits.length + dim.length).toBe(svg.querySelectorAll('rect.bar-seg').length);
     // 含暴击的段：第 2 根柱子 3 段 + 第 3 根柱子那一段（4 条全齐）
     expect(hits.length).toBe(4);
+    // 命中段不再描边（作者：「不要用黑边框，太丑」）—— 颜色由 CSS 的
+    // `.bar-seg.seg-hit { fill: var(--hit-fill) }` 换成暖橙，这里只能验到类名，
+    // 真正的观感在浏览器截图里看过（temp/probe-q/）。
+    for (const r of hits) expect(r.getAttribute('stroke')).toBeNull();
+  });
+
+  it('命中段的浮框色块用同一个暖橙（与图上那段颜色对得上）', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const tooltip = new Tooltip(host);
+    host.append(renderQualityStacked({ bars, highlight: ['暴击'], tooltip }));
+    host
+      .querySelectorAll('rect.hot-rect')[1]!
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    const dots = [...host.querySelectorAll<HTMLElement>('.tt-dot')].map((d) => d.style.background);
+    // 三行命中段（暴击、暴击+精通、暴击+精通+大攻击）+ 一行累计概率，各带一个色块
+    expect(dots).toHaveLength(4);
+    for (const c of dots.slice(0, 3)) expect(c).toBe('var(--hit-fill)');
+  });
+
+  it('段色由浅到深、字色跟着翻（深段白字、浅段深字），且不落在色标两端', () => {
+    const n = 5;
+    const colors = [0, 1, 2, 3, 4].map((k) => segmentColor(k, n));
+    // 同一列里由下到上越来越深
+    for (let i = 1; i < colors.length; i++) {
+      expect(luminance(colors[i]!)).toBeLessThan(luminance(colors[i - 1]!));
+    }
+    // 浅段深字、最深的一段白字
+    expect(inkOn(colors[0]!)).toBe('#26303d');
+    expect(inkOn(colors[4]!)).toBe('#ffffff');
+    // 取色位置是 (k+1)/(n+1)：单段的一列取正中那档，不会淡成一片白、也不会黑成一块
+    const single = segmentColor(0, 1);
+    expect(luminance(single)).toBeLessThan(luminance(BLUE_RAMP[0]!));
+    expect(luminance(single)).toBeGreaterThan(luminance(BLUE_RAMP[BLUE_RAMP.length - 1]!));
+  });
+
+  it('命中段的段内文字写深字（暖橙底上白字看不清）', () => {
+    // 勾「暴伤」：第 2 根柱子的三段都不含暴伤（非命中），最深那一段要写白字
+    const svg = renderQualityStacked({ bars, highlight: ['暴伤'], tooltip: makeTooltip() });
+    const labels = [...svg.querySelectorAll('text.seg-label')];
+    expect(labels.some((t) => t.classList.contains('on-dark'))).toBe(true);
+    for (const t of labels) {
+      if (t.textContent?.includes('暴伤')) expect(t.classList.contains('on-dark')).toBe(false);
+    }
   });
 
   it('勾两个词条 = 同时含这两条才算命中（与参考实现的 issubset 一致）', () => {
@@ -768,7 +808,7 @@ describe('质量分布', () => {
     expect(svg.querySelectorAll('.seg-hit, .seg-dim')).toHaveLength(0);
   });
 
-  it('勾选词的合计标在图内右上角', () => {
+  it('勾选词的合计画在**绘图区内**的右上角（照归档参考实现的图例位置）', () => {
     const svg = renderQualityStacked({
       bars,
       highlight: ['暴击'],
@@ -778,23 +818,26 @@ describe('质量分布', () => {
     const value = svg.querySelector('text.pick-value')!;
     expect(value.textContent).toBe('12.34%');
     expect(svg.querySelector('text.pick-label')!.textContent).toBe('含 暴击');
-    // 右上角：x 在右半边、y 在标题行那一带（图内，不压到柱子上）
-    expect(Number(value.getAttribute('x'))).toBeGreaterThan(500);
-    expect(Number(value.getAttribute('y'))).toBeLessThan(40);
-    expect(value.getAttribute('text-anchor')).toBe('end');
-    // 光一行文字在图上不够显眼：外面套一个框（作者要求「加个框高亮」）
+    expect(svg.querySelector('rect.pick-swatch')).not.toBeNull();
+
     const box = svg.querySelector('rect.pick-box')!;
-    expect(box).not.toBeNull();
-    const right = Number(box.getAttribute('x')) + Number(box.getAttribute('width'));
-    expect(right).toBeGreaterThan(Number(value.getAttribute('x')));
-    expect(Number(box.getAttribute('y'))).toBeLessThan(Number(value.getAttribute('y')));
-    // 右轴最上面那条累计刻度（100%）就在绘图区上沿，底框不能压到它
-    // （刻度是绘图区局部坐标，要加上上边距才是画布坐标）
-    const topCum =
-      Math.min(...[...svg.querySelectorAll('text.cum-label')].map((n) => Number(n.getAttribute('y')))) +
-      40;
-    const bottom = Number(box.getAttribute('y')) + Number(box.getAttribute('height'));
-    expect(bottom).toBeLessThan(topCum - 4);
+    const height = Number(svg.getAttribute('viewBox')!.split(' ')[3]);
+    const plotW = Number(svg.getAttribute('viewBox')!.split(' ')[2]) - 56 - 72;
+    const plotH = height - 40 - 58;
+    const x = Number(box.getAttribute('x'));
+    const y = Number(box.getAttribute('y'));
+    // 整框在绘图区**里面**（作者：「放在图片内的右上角，而不是图片外」）
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(x + Number(box.getAttribute('width'))).toBeLessThanOrEqual(plotW);
+    expect(y + Number(box.getAttribute('height'))).toBeLessThanOrEqual(plotH);
+    // 而且贴着右上角：右边留白 ≤ 10px，上边留白 ≤ 10px
+    expect(plotW - (x + Number(box.getAttribute('width')))).toBeLessThanOrEqual(10);
+    expect(y).toBeLessThanOrEqual(10);
+    // 右轴的累计刻度都在绘图区外面 → 这个位置不会压到它们
+    for (const t of svg.querySelectorAll('text.cum-label')) {
+      expect(Number(t.getAttribute('x'))).toBeGreaterThan(plotW);
+    }
   });
 
   it('不勾选就不画角标（没有「合计」可标）', () => {

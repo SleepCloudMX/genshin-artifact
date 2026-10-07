@@ -830,24 +830,66 @@ export function categoricalColor(index: number): string {
 }
 
 /**
- * 把颜色往白色方向调 `amount`（0~1），用来做同一段柱子的渐变亮端。
+ * 蓝色色标（浅 → 深）。**热力图与「质量分布」的段共用同一套**，全站就这一条渐变。
  *
- * 只接受 `#rrggbb`（`CATEGORICAL_COLORS` 就是这个写法）；别的写法原样返回，
- * 免得为了兜底在渲染路径里塞一堆解析分支。
+ * 出处是归档 `init_stats.py`：热力图与质量分布都取 `sns.color_palette("Blues_d", …)`，
+ * 所以网页这边也走单色相由浅到深的蓝。取色两头都不走极端（作者的老要求）：
+ * 最浅那档只比背景深一点，最深那档留一点余地，格子/段里的数字才一直读得清。
  */
-export function lighten(color: string, amount: number): string {
-  const m = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!m) return color;
-  const n = parseInt(m[1]!, 16);
-  const mix = (c: number): number => Math.round(c + (255 - c) * amount);
-  const r = mix((n >> 16) & 255);
-  const g = mix((n >> 8) & 255);
-  const b = mix(n & 255);
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+export const BLUE_RAMP = [
+  '#eef4fa', // 几乎就是背景
+  '#cfe0ee',
+  '#a9c9e2',
+  '#7fadd0',
+  '#4a83b0',
+  '#32719f', // 最深：白字
+] as const;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** 渐变 `id` 的自增后缀：同一个页面上可能同时存在好几张图，`id` 不能撞 */
-let chartSeq = 0;
+/** 色标上 `t`（0~1）处的颜色，档与档之间线性插值 */
+export function rampColor(t: number): string {
+  const x = Math.min(Math.max(t, 0), 1) * (BLUE_RAMP.length - 1);
+  const i = Math.min(Math.floor(x), BLUE_RAMP.length - 2);
+  const k = x - i;
+  const a = hexToRgb(BLUE_RAMP[i]!);
+  const b = hexToRgb(BLUE_RAMP[i + 1]!);
+  const mix: [number, number, number] = [
+    a[0] + (b[0] - a[0]) * k,
+    a[1] + (b[1] - a[1]) * k,
+    a[2] + (b[2] - a[2]) * k,
+  ];
+  return `#${mix.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** sRGB 相对亮度（0~1）：决定一个底色上该写深字还是白字 */
+export function luminance(hex: string): number {
+  const lin = hexToRgb(hex).map((c) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
+}
+
+/** 底色上的字色：深底写白字、浅底写深字（**不要写死一个颜色**） */
+export function inkOn(fill: string): string {
+  return luminance(fill) < 0.28 ? '#ffffff' : '#26303d';
+}
+
+/**
+ * 「质量分布」一列里第 `k` 段（共 `n` 段）的颜色。
+ *
+ * **渐变是段与段之间的事，段内是纯色** —— 作者的原话：「渐变色是让你一列的多个小柱子
+ * 用渐变色，单个柱子内颜色不变」。位置取 `(k + 1) / (n + 1)`：既铺满整条色标，
+ * 又永远不落在两端的极值上（单段的一列取正中间那档，不会淡成一片白）。
+ * 跨列不复用同一套编码（作者：列间不需要区分度），每列都由浅到深。
+ */
+export function segmentColor(k: number, n: number): string {
+  return rampColor((k + 1) / (n + 1));
+}
 
 /** 累计概率曲线（红线）的颜色。CSS 里也有一份，浮框的色块要与线一致 */
 const CUM_COLOR = '#e74c3c';
@@ -1010,32 +1052,15 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
 
   /** 堆叠顺序：条数少的在下面，同档按概率降序。颜色按这个顺序取 */
   const segsOf = bars.map((b) => [...b.segments].sort((x, y) => x.size - y.size || y.p - x.p));
-  /** 段 → 颜色，浮框的色块要与图上画的那一段对上 */
-  const colorOf = new Map<QualitySegment, string>();
-
   /**
-   * 子柱子（段）用**渐变色**：每段一条竖向渐变，上端是该色的浅色调、下端是本色。
+   * 段 → 图上真正的填充色，浮框的色块靠它与图上对上。
    *
-   * 每段仍取自己的分类色（柱内要分得清，这是作者先前的要求），渐变只是给同一段
-   * 加上深浅层次，柱子不再是一摞纯色块。渐变按段的序号定义一次，所有柱子的第 k 段共用。
+   * 命中段在图上会被 CSS 换成暖橙（`seg-hit`），所以这里也存那个颜色 ——
+   * 写成 `var(--accent-warm)` 能跟着主题走（浮框的色块是内联样式，认得 CSS 变量）。
    */
-  const segCount = Math.max(...segsOf.map((s) => s.length), 1);
-  const gradientId = `qseg${++chartSeq}`;
-  const defs = el('defs');
-  for (let k = 0; k < segCount; k++) {
-    const color = categoricalColor(k);
-    const grad = el('linearGradient', {
-      id: `${gradientId}-${k}`,
-      x1: '0',
-      y1: '0',
-      x2: '0',
-      y2: '1',
-    });
-    grad.append(el('stop', { offset: '0', 'stop-color': lighten(color, 0.45) }));
-    grad.append(el('stop', { offset: '1', 'stop-color': color }));
-    defs.append(grad);
-  }
-  f.svg.append(defs);
+  const colorOf = new Map<QualitySegment, string>();
+  /** 命中段的填充色（与 CSS `.seg-hit` 里的值保持一致） */
+  const HIT_FILL = 'var(--hit-fill)';
 
   // --- 标注放不放得下：先算，画的时候按这个来 ---
   //
@@ -1088,29 +1113,33 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
     });
   }
 
-  // --- 柱子：按组合的条数从少到多堆 ---
+  // --- 柱子：按组合的条数从少到多堆；一列里由浅到深渐变，段内纯色 ---
   bars.forEach((b, i) => {
     const x = xOf(i);
+    const segs = segsOf[i]!;
     let bottom = 0;
-    for (const [k, s] of segsOf[i]!.entries()) {
+    for (const [k, s] of segs.entries()) {
       if (s.p <= 0) continue;
       const y0 = yOf(bottom + s.p);
       const h = yOf(bottom) - y0;
-      const color = categoricalColor(k);
-      colorOf.set(s, color);
+      const hit = isHit(s);
+      // 段色：命中段在 CSS 里被换成暖橙（`.seg-hit`），所以只算非命中段要画的那个色
+      const color = segmentColor(k, segs.length);
+      const ink = inkOn(color);
+      colorOf.set(s, hit ? HIT_FILL : color);
       const rect = el('rect', {
         x: x - barW / 2,
         y: y0,
         width: barW,
         height: Math.max(h, 0.6),
-        fill: `url(#${gradientId}-${k})`,
+        fill: color,
         // `quality-seg`：段之间留一道背景色细缝，浅色相邻时靠它分界
         class: 'bar-seg quality-seg',
       });
-      // 勾选框的命中段：描边挑出来，其余压暗。压暗比「换个颜色」更能看清
-      // 「哪些段属于它」，而且不会把段色这套编码毁掉。
+      // 勾选框的命中段：**换成暖橙**（照归档参考实现 `facecolor='#FF8C00'`），
+      // 其余压暗。不再描那一圈黑边 —— 作者：「不要用黑边框，太丑」。
       if (highlight.length > 0) {
-        rect.classList.add(isHit(s) ? 'seg-hit' : 'seg-dim');
+        rect.classList.add(hit ? 'seg-hit' : 'seg-dim');
       }
       f.plot.append(rect);
 
@@ -1119,14 +1148,16 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
       const lines = wrapCombo(s.label, barW - 6);
       const rows = lines ? lines.length + 1 : 0;
       if (lines && h >= rows * 10 + 2) {
-        const dim = highlight.length > 0 && !isHit(s);
+        const dim = highlight.length > 0 && !hit;
+        // 命中段是橙色底 → 深字；非命中段按段的深浅翻白字
+        const onDark = !hit && ink === '#ffffff';
         const top = y0 + h / 2 - ((rows - 1) * 10) / 2 + 3.5;
         lines.forEach((line, n) => {
           const t = text(line, {
             x,
             y: top + n * 10,
             'text-anchor': 'middle',
-            class: 'seg-label',
+            class: onDark ? 'seg-label on-dark' : 'seg-label',
           });
           if (dim) t.classList.add('seg-dim');
           f.plot.append(t);
@@ -1135,7 +1166,7 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
           x,
           y: top + lines.length * 10,
           'text-anchor': 'middle',
-          class: 'seg-pct',
+          class: onDark ? 'seg-pct on-dark' : 'seg-pct',
         });
         if (dim) value.classList.add('seg-dim');
         f.plot.append(value);
@@ -1202,40 +1233,56 @@ export function renderQualityStacked(opts: QualityChartOptions): SVGSVGElement {
     );
   });
 
-  // --- 勾选词条的合计：图的右上角，外加一个底框把它框住（作者要求「加个框高亮」） ---
+  // --- 勾选词条的合计：**画在绘图区内的右上角**（照归档参考实现的图例） ---
   //
-  // 摆在最上面一行（基线 26）：右轴的第一个累计刻度（100%）正好在绘图区上沿，
-  // 底框压下去会盖住它 —— 抬高 6px 两边就互不打扰。
+  // 参考实现是 `ax1.legend(loc=…)`，也就是画在坐标区里面；作者要的是同一个位置
+  // （原话「放在图片内的右上角，而不是图片外」），所以坐标从绘图区右上角往内收，
+  // 右端停在 plotW 之内 —— 也就不会压到右轴那排累计刻度（它们在绘图区外面）。
   if (opts.pickNote) {
-    const valueX = width - 12;
+    const padX = 8;
+    const swatch = 9;
+    const h = 20;
+    const top = 8;
     const valueW = textWidth(opts.pickNote.value, 12);
     const labelW = textWidth(opts.pickNote.label, 11);
-    const left = valueX - valueW - 8 - labelW;
-    // 底框按两段文字的估算宽度给，四周各留 8 / 7 的余量
-    f.svg.append(
+    const right = f.plotW - 8;
+    const left = right - padX * 2 - swatch - 6 - labelW - 6 - valueW;
+    const baseline = top + h / 2 + 4;
+    // 底框：白底 + 暖橙描边（与命中段同一个颜色，一眼看出这个数说的是哪些段）
+    f.plot.append(
       el('rect', {
-        x: left - 8,
-        y: 11,
-        width: valueX - left + 8,
-        height: 21,
+        x: left,
+        y: top,
+        width: right - left,
+        height: h,
         rx: 6,
         class: 'pick-box',
       }),
     );
-    f.svg.append(
-      text(opts.pickNote.value, {
-        x: valueX - 4,
-        y: 26,
-        'text-anchor': 'end',
-        class: 'pick-value',
+    f.plot.append(
+      el('rect', {
+        x: left + padX,
+        y: top + h / 2 - swatch / 2,
+        width: swatch,
+        height: swatch,
+        rx: 2,
+        class: 'pick-swatch',
       }),
     );
-    f.svg.append(
+    f.plot.append(
       text(opts.pickNote.label, {
-        x: valueX - 4 - valueW - 8,
-        y: 26,
-        'text-anchor': 'end',
+        x: left + padX + swatch + 6,
+        y: baseline,
+        'text-anchor': 'start',
         class: 'pick-label',
+      }),
+    );
+    f.plot.append(
+      text(opts.pickNote.value, {
+        x: right - padX,
+        y: baseline,
+        'text-anchor': 'end',
+        class: 'pick-value',
       }),
     );
   }

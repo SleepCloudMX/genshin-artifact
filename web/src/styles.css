@@ -18,6 +18,9 @@
   --accent-2: #0d9488;
   /* 强调用的暖色（组合概率里「得分最高那一项」的文字） */
   --accent-warm: #d9480f;
+  /* 命中段的填充色：暖橙，照归档参考实现的 `#FF8C00`（比 accent-warm 亮，
+     适合当大块底色，段内的深色字在它上面读得清） */
+  --hit-fill: #ff8c00;
   --warn: #b45309;
   --err: #d92d20;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 4%);
@@ -42,6 +45,7 @@
   --accent-soft: #1b2740;
   --accent-2: #2dd4bf;
   --accent-warm: #ffa94d;
+  --hit-fill: #f59a33;
   --warn: #fbbf24;
   --err: #f87171;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%);
@@ -516,17 +520,19 @@ svg.pie .pie-slice:hover { opacity: 1; }
 .pie-label[data-top], .pie-pct[data-top] { fill: var(--accent-warm); }
 
 /* 质量分布：柱内标注 + 累计概率曲线 + 勾选高亮 */
-/* 段色是浅色（见 charts.CATEGORICAL_COLORS），所以段内文字用深色 —— 浅底上白字看不清，
-   参考图（matplotlib 那几张）也是深字。 */
+/* 段色按堆叠顺序取蓝色色标（`charts.segmentColor`，浅 → 深），所以段内文字要按
+   段的深浅翻深 / 白（`inkOn`）—— `on-dark` 就是「这一段深到要写白字」。 */
 .seg-label { fill: #26303d; font-size: 9.5px; font-weight: 600; }
 .seg-pct { fill: rgb(38 48 61 / 78%); font-size: 9px; font-family: var(--mono); }
+.seg-label.on-dark { fill: #ffffff; }
+.seg-pct.on-dark { fill: rgb(255 255 255 / 82%); }
 /* 段之间的细缝：浅色相邻时靠它分界，最上面那一段在纯白底上也有轮廓 */
 .bar-seg.quality-seg { stroke: var(--bg-elev); stroke-width: 1; }
-/* 勾选的词条：命中的段描一圈，其余压暗 —— 压暗比「给命中段换个颜色」更清楚，
-   也不会把段色这套编码毁掉。描边用文字色：浅底上深描边、深色主题下浅描边，
-   两种主题都看得见，也不必再从色盘里躲开某个颜色。 */
-.bar-seg.seg-dim, .seg-label.seg-dim, .seg-pct.seg-dim { opacity: .2; }
-.bar-seg.seg-hit { stroke: var(--text); stroke-width: 1.8; }
+/* 勾选的词条：命中的段**换成暖橙**（照归档参考实现的 `facecolor='#FF8C00'`），
+   其余压暗到一半 —— 压暗是为了让橙色跳出来，但**不能压到看不清**：
+   全暗（0.2）那张图像整张图被抽走了，作者那边的参考实现是压根不压暗。 */
+.bar-seg.seg-dim, .seg-label.seg-dim, .seg-pct.seg-dim { opacity: .5; }
+.bar-seg.seg-hit { fill: var(--hit-fill); }
 .cum-line { fill: none; stroke: #e74c3c; stroke-width: 2; }
 .cum-dot { fill: #e74c3c; }
 .cum-guide { stroke: #e74c3c; stroke-width: .6; stroke-dasharray: 3 4; opacity: .3; }
@@ -534,10 +540,12 @@ svg.pie .pie-slice:hover { opacity: 1; }
 /* 右轴名竖排（画在图的右边缘中段），把右上角让给「含勾选词条的比例」角标 */
 .cum-title { fill: #e74c3c; font-size: 11px; }
 /* 图内右上角的角标：勾选了哪几条 + 同时含这几条的概率。
-   加一个底框把它框住 —— 光靠一行文字在图上不够显眼（作者要求）。 */
-.pick-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: .8; }
+   画在**绘图区里面**的右上角（作者：「放在图片内的右上角，而不是图片外」），
+   照归档参考实现那个图例的样子：白底、暖橙描边、左边一个小色块。 */
+.pick-box { fill: var(--bg-elev); stroke: var(--hit-fill); stroke-width: 1; }
+.pick-swatch { fill: var(--hit-fill); }
 .pick-label { fill: var(--text-dim); font-size: 11px; }
-.pick-value { fill: var(--accent); font-size: 12px; font-weight: 650; font-family: var(--mono); }
+.pick-value { fill: var(--text); font-size: 12px; font-weight: 650; font-family: var(--mono); }
 
 /* 图内工具条上的勾选框（「质量分布」用） */
 .chart-tools.checks { gap: 4px 14px; }
