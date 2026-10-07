@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { mount } from '../src/ui/app';
 import * as C from '../src/ui/copy';
+import { GROWTH_ORDER } from '../src/core/stats';
 import {
   CANONICAL_WEIGHT,
   defaultState,
@@ -56,6 +57,17 @@ function setSelect(el: HTMLSelectElement, value: string): void {
 function setInput(el: HTMLInputElement, value: string): void {
   el.value = value;
   fire(el, 'input');
+}
+
+/**
+ * 权重框：**`change`（回车 / 失焦）才提交**。
+ *
+ * 派发 `input` 只等于「正在打字」，界面刻意不提交 —— 提交会重建整行、夺走焦点，
+ * 那样连「清空重打」都做不到（见 `app.ts` 的委托注释）。
+ */
+function setWeight(el: HTMLInputElement, value: string): void {
+  el.value = value;
+  fire(el, 'change');
 }
 
 // ---- 查询助手（注意：配置栏每次状态变化会重建节点，不要缓存引用） ----
@@ -257,7 +269,7 @@ describe('权重：− / + 与数字框', () => {
   it('非默认权重按 0.1 步进', () => {
     const root = freshRoot();
     mount(root);
-    setInput(weightInputs(root)[0]!, '1.5');
+    setWeight(weightInputs(root)[0]!, '1.5');
     stepper(root, 0).plus.click();
     expect(weightInputs(root)[0]!.value).toBe('1.6');
     stepper(root, 0).minus.click();
@@ -271,7 +283,7 @@ describe('权重：− / + 与数字框', () => {
     const read = () => weightInputs(root)[0]!.value;
     // 从 0 起步的第一次会跳到该词条的默认权重（暴击 → 2），
     // 所以累积检查要从一个非默认起点开始
-    setInput(weightInputs(root)[0]!, '0.1');
+    setWeight(weightInputs(root)[0]!, '0.1');
     stepper(root, 0).plus.click();
     expect(read()).toBe('0.2');
     stepper(root, 0).plus.click();
@@ -293,7 +305,7 @@ describe('权重：− / + 与数字框', () => {
   it('− 不会把权重压到负数', () => {
     const root = freshRoot();
     mount(root);
-    setInput(weightInputs(root)[0]!, '0.05');
+    setWeight(weightInputs(root)[0]!, '0.05');
     stepper(root, 0).minus.click();
     expect(weightInputs(root)[0]!.value).toBe('0');
   });
@@ -309,18 +321,37 @@ describe('权重：− / + 与数字框', () => {
     expect(nextWeightDown('', 0)).toBe(0);
   });
 
-  it('权重框仍可直接输入任意值', () => {
+  it('权重框要按回车 / 失焦才提交，打字过程中不动结果', () => {
     const root = freshRoot();
     mount(root);
-    setInput(weightInputs(root)[1]!, '0.25');
+    const before = cardValues(root)[3]!; // 最高可能分跟着权重走
+    const input = weightInputs(root)[1]!; // 第 2 行：暴伤，权重 1
+
+    input.value = '0.25';
+    fire(input, 'input');
+    expect(cardValues(root)[3]).toBe(before); // 只是打字，还没提交
+
+    fire(input, 'change'); // 回车 / 失焦
+    expect(cardValues(root)[3]).not.toBe(before);
     expect(weightInputs(root)[1]!.value).toBe('0.25');
     expect(root.querySelector('.error')).toBeNull();
+  });
+
+  it('提交后不重建整行 —— 否则焦点和刚敲的字都会被丢掉', () => {
+    const root = freshRoot();
+    mount(root);
+    const input = weightInputs(root)[1]!;
+    input.value = '0.25';
+    fire(input, 'change');
+    // 还是同一个节点、还是刚敲的值：说明配置栏只做同步，没有 replaceChildren
+    expect(weightInputs(root)[1]).toBe(input);
+    expect(input.value).toBe('0.25');
   });
 
   it('权重留空按 0 处理，不抛错', () => {
     const root = freshRoot();
     mount(root);
-    setInput(weightInputs(root)[0]!, '');
+    setWeight(weightInputs(root)[0]!, '');
     expect(root.querySelector('.error')).toBeNull();
     expect(visibleSubPanel(root).querySelector('svg')).not.toBeNull();
   });
@@ -343,11 +374,11 @@ describe('初始档位（第三列）', () => {
   it('档位选项带数值（按词条的实际成长值 × 权重）', () => {
     const root = freshRoot();
     mount(root);
-    // 第 1 行是暴击，权重 2 → 四档 2.7/3.1/3.5/3.9 × 2
+    // 第 1 行是暴击，权重 2 → 四档 2.72/3.11/3.50/3.89 × 2
     const labels = [...rollSelects(root)[0]!.options].map((o) => o.textContent);
     expect(labels[0]).toBe(C.ROLL_RANDOM);
-    expect(labels[1]).toBe('5.4');
-    expect(labels[4]).toBe('7.8');
+    expect(labels[1]).toBe('5.44');
+    expect(labels[4]).toBe('7.78');
   });
 
   it('改词条后档位标签跟着换', () => {
@@ -356,8 +387,8 @@ describe('初始档位（第三列）', () => {
     setSelect(attrSelects(root)[0]!, '充能');
     const labels = [...rollSelects(root)[0]!.options].map((o) => o.textContent);
     // 充能没有默认口径 → 选中时权重 1，档位标签就是原始成长值
-    expect(labels).toContain('4.5');
-    expect(labels).toContain('6.5');
+    expect(labels).toContain('4.53');
+    expect(labels).toContain('6.48');
   });
 
   it('固定初始档位会真的改变分布', () => {
@@ -403,7 +434,7 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelector('[data-tab="quality"]')).toBeNull();
   });
 
-  it('得分分布页有四个子 tab，且默认只显示第一个', () => {
+  it('得分分布页有五个子 tab，且默认只显示第一个', () => {
     const root = freshRoot();
     mount(root);
     expect(subLabels(root)).toEqual([
@@ -411,9 +442,35 @@ describe('主 tab 与子 tab', () => {
       C.SUB_SURVIVAL,
       C.SUB_HITS,
       C.SUB_QUANTILE,
+      C.SUB_GROWTHS,
     ]);
     expect(root.querySelectorAll('.subtab-panel:not([hidden])')).toHaveLength(1);
     expect(visibleSubPanel(root).querySelector('#scoreChart svg')).not.toBeNull();
+  });
+
+  it('「成长值」子 tab 列出全部 10 条词条的四档成长值', () => {
+    const root = freshRoot();
+    mount(root);
+    clickSub(root, C.SUB_GROWTHS);
+    const rows = [...visibleSubPanel(root).querySelectorAll('#growthsTable tbody tr')];
+    expect(rows).toHaveLength(GROWTH_ORDER.length);
+    expect(GROWTH_ORDER).toHaveLength(10);
+    expect(rows.map((r) => r.querySelector('td')!.textContent)).toEqual([...GROWTH_ORDER]);
+    // 表头 + 数值都是真实成长值（两位小数），不是取整后的显示值
+    const head = [...visibleSubPanel(root).querySelectorAll('#growthsTable th')].map(
+      (n) => n.textContent,
+    );
+    expect(head).toEqual([C.TH_GROWTH_ATTR, ...C.TH_GROWTH_TIERS]);
+    const crit = rows.find((r) => r.textContent!.startsWith('暴击'))!;
+    expect([...crit.querySelectorAll('td')].map((n) => n.textContent)).toEqual([
+      '暴击',
+      '2.72',
+      '3.11',
+      '3.5',
+      '3.89',
+    ]);
+    // 一条不计分的词条也照样列出来
+    expect(rows.map((r) => r.querySelector('td')!.textContent)).toContain('小防御');
   });
 
   it('每张图在自己的子 tab 里，切过去才渲染', () => {
@@ -576,7 +633,7 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
   }
 
 
-  it('分桶下拉的档位是 0.1/0.2/0.5/1/2/5', () => {
+  it('分桶下拉的档位是 0.1/0.2/0.5/1/2/5，默认 0.2', () => {
     const root = freshRoot();
     mount(root);
     expect([...bucketSelect(root).options].map((o) => o.value)).toEqual([
@@ -587,6 +644,10 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
       '2',
       '5',
     ]);
+    // 默认档写死在 state.defaultGrowth 里，**不按柱数自动挑**：
+    // 自动挑的档会随输入悄悄变，看起来还是同一个视图，比例尺却换了
+    expect(bucketSelect(root).value).toBe('0.2');
+    expect(defaultState().bucketSize).toBe(0.2);
   });
 
   /** 图上柱子根数（按热区数算） */
@@ -594,39 +655,43 @@ describe('分桶（柱数太多时合并相邻分数）', () => {
     return visibleSubPanel(root).querySelectorAll('#scoreChart rect.hot-rect').length;
   }
 
-  it('柱数没超上限时不分桶', () => {
+  it('默认 0.2 分桶：把相邻的分数并成一根柱子', () => {
     const root = freshRoot();
     mount(root);
-    // 默认配置只有 87 个可能分数
-    expect(bucketSelect(root).value).toBe('0.1');
-    expect(barCount(root)).toBe(87);
+    // 默认配置（暴击 2 / 暴伤 1、4 词条）有 75 个可能分数，0.2 分桶后 66 根
+    expect(barCount(root)).toBe(66);
   });
 
-  it('柱数超过 100 时自动挑一档分桶，且柱数落回上限内', () => {
+  it('0.1 = 不分桶：一个可能分数一根柱子', () => {
     const root = freshRoot();
     mount(root);
-    // 多给几个计分词条 → 可能分数变多
-    setSelect(attrSelects(root)[2]!, '充能');
-    setSelect(attrSelects(root)[3]!, '精通');
-
-    expect(barCount(root)).toBeLessThanOrEqual(100);
-    expect(Number(bucketSelect(root).value)).toBeGreaterThan(0.1);
+    setSelect(bucketSelect(root), '0.1');
+    expect(barCount(root)).toBe(75);
   });
 
-  it('手动选的档位会生效，并写进分享链接', () => {
+  it('档位越粗，柱子越少', () => {
     const root = freshRoot();
     mount(root);
-    const sel = bucketSelect(root);
-    setSelect(sel, '2');
+    setSelect(bucketSelect(root), '1');
+    expect(barCount(root)).toBe(45);
+    setSelect(bucketSelect(root), '2');
+    expect(barCount(root)).toBe(23);
+  });
+
+  it('选的档位会生效，并写进分享链接', () => {
+    const root = freshRoot();
+    mount(root);
+    setSelect(bucketSelect(root), '2');
     expect(bucketSelect(root).value).toBe('2');
-    expect(barCount(root)).toBeLessThan(87);
 
     // 往返：bucket 参数能读回来
     const s = { ...defaultState(), bucketSize: 2 };
     expect(fromQuery('?' + toQuery(s)).bucketSize).toBe(2);
-    // 没选过（0）时不写进链接，读回来仍是 0
-    expect(toQuery({ ...defaultState(), bucketSize: 0 })).not.toContain('bucket');
-    expect(fromQuery('?' + toQuery({ ...defaultState(), bucketSize: 0 })).bucketSize).toBe(0);
+    // 分桶没有「没选过」这个状态，一律写进链接（默认值也是）
+    expect(toQuery(defaultState())).toContain('bucket=0.2');
+    // 老链接（没有 bucket）回落到默认档，而不是 0 / 自动挑
+    expect(fromQuery('?main=%E7%81%AB%E4%BC%A4&slots=a:1:random,b:1:random,c:1:random,d:1:random')
+      .bucketSize).toBe(0.2);
   });
 
   it('分桶后轴标号仍是 0.1 网格（不带浮点毛刺）', () => {
@@ -791,11 +856,13 @@ describe('得分分布页', () => {
     );
   });
 
-  it('主词条火伤、暴击2暴伤1 时最高分是 55.4', () => {
+  it('主词条火伤、暴击2暴伤1、4 词条时最高分是 54.5', () => {
     const root = freshRoot();
     mount(root);
-    // 暴击 2（四档 2.7~3.9）+ 暴伤 1（5.4~7.8），满命中 5 次
-    expect(Number(cardValues(root)[3])).toBeGreaterThan(0);
+    // 暴击 2（四档 2.72~3.89）+ 暴伤 1（5.44~7.77），5 次成长全给暴击：
+    // 6 × 3.89 × 2 + 1 × 7.77 = 54.45 → 四舍五入 54.5
+    // （用游戏内显示值会算成 6 × 3.9 × 2 + 7.8 = 54.6，偏高 0.1）
+    expect(cardValues(root)[3]).toBe('54.5');
     expect(root.querySelector('.summary')).toBeNull(); // 概览句已删
   });
 
@@ -823,7 +890,7 @@ describe('得分分布页', () => {
   it('无计分槽位时不崩', () => {
     const root = freshRoot();
     mount(root);
-    for (const input of weightInputs(root)) setInput(input, '0');
+    for (const input of weightInputs(root)) setWeight(input, '0');
     expect(visibleSubPanel(root).querySelector('svg')).not.toBeNull();
     expect(root.querySelector('.error')).toBeNull();
   });
@@ -918,6 +985,22 @@ describe('状态 → 计算输入', () => {
 
   it('weightMap 只保留权重 > 0 的条目', () => {
     expect(weightMap(defaultState())).toEqual({ 暴击: 2, 暴伤: 1 });
+  });
+
+  it('权重允许小数，但精度口径是两位小数', () => {
+    const s = defaultState();
+    s.slots[1]!.weight = 0.25; // 暴伤
+    expect(toSpec(s).spec.slots[1]!.weight).toBe(0.25);
+
+    // core 按 ×100 把权重变整数，第三位及以后会被丢掉 —— 在入口就归整，
+    // 「界面上显示的值」与「真正参与运算的值」才是同一个
+    s.slots[1]!.weight = 0.333;
+    expect(toSpec(s).spec.slots[1]!.weight).toBe(0.33);
+
+    // 归整后为 0 的等同不计分
+    s.slots[1]!.weight = 0.001;
+    expect(toSpec(s).scoredCount).toBe(1);
+    expect(weightMap(s)).toEqual({ 暴击: 2 });
   });
 
   it('selectableAttrs 剔掉与主词条同名的副词条', () => {

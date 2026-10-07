@@ -63,6 +63,27 @@ describe('坐标轴工具', () => {
     expect(tickIndices(283).length).toBeLessThanOrEqual(9);
   });
 
+  it('相邻刻度不会挤在一起（末尾那条曾叠成 52.854.4）', () => {
+    // 默认分桶 0.2 分时正好是 66 根柱子：旧写法会在末尾多插一格，与前一条重叠
+    expect(tickIndices(66, 8)).toEqual([0, 9, 19, 28, 37, 46, 56, 65]);
+    /** 绘图区约 806px 宽，轴标约 24px 宽 —— 间隔换算成像素要放得下一条标签 */
+    const PLOT_W = 806;
+    const LABEL_W = 24;
+    for (const count of [9, 12, 30, 66, 75, 87, 210, 283, 1000]) {
+      for (const maxLabels of [5, 8, 12]) {
+        const t = tickIndices(count, maxLabels);
+        const tag = `count=${count} maxLabels=${maxLabels}`;
+        expect(t[0], tag).toBe(0);
+        expect(t[t.length - 1], tag).toBe(count - 1);
+        expect(t.length, tag).toBeLessThanOrEqual(maxLabels);
+        for (let i = 1; i < t.length; i++) {
+          expect(t[i]!, tag).toBeGreaterThan(t[i - 1]!);
+          expect((t[i]! - t[i - 1]!) * (PLOT_W / count), tag).toBeGreaterThan(LABEL_W);
+        }
+      }
+    }
+  });
+
   it('nearestIndex 找最近的分数', () => {
     expect(nearestIndex([10, 20, 30], 21)).toBe(1);
     expect(nearestIndex([10, 20, 30], 100)).toBe(2);
@@ -171,7 +192,7 @@ describe('得分分布堆叠柱', () => {
     expect(value(multi.host)).toContain('占本柱');
   });
 
-  it('分桶柱的悬停标题写成左闭右开区间 [a, b)', () => {
+  it('分桶柱的悬停标题写成左闭右开区间 [a, b) 分', () => {
     const { host } = hoverBar(
       [
         { score: 10, range: { min: 10.0, max: 10.9 }, byHit: [0.2, 0.3, 0, 0, 0, 0] },
@@ -179,7 +200,8 @@ describe('得分分布堆叠柱', () => {
       ],
       0,
     );
-    expect(host.querySelector('.tooltip .tt-title')!.textContent).toBe('[10.0, 11.0)');
+    // 单位不能省：同一行上方还有 `12.5 分` 这种单点写法
+    expect(host.querySelector('.tooltip .tt-title')!.textContent).toBe('[10.0, 11.0) 分');
     // 末尾那根桶只到 11.0，闭区间写法退化成左闭右开 + 真实上界
     const { host: h2 } = hoverBar(
       [
@@ -188,7 +210,7 @@ describe('得分分布堆叠柱', () => {
       ],
       1,
     );
-    expect(h2.querySelector('.tooltip .tt-title')!.textContent).toBe('[11.0, 11.5)');
+    expect(h2.querySelector('.tooltip .tt-title')!.textContent).toBe('[11.0, 11.5) 分');
   });
 
   it('不分桶时标题就是单点分数', () => {
@@ -271,6 +293,24 @@ describe('生存曲线（独立成图）', () => {
       tooltip: makeTooltip(),
     });
     expect(svg.querySelectorAll('rect.bar-seg')).toHaveLength(0);
+  });
+
+  it('与「概率分布」用同一套画布尺寸（兄弟视图不能一大一小）', () => {
+    // 两张图在同一个面板位置上互相切换：宽度本来就都是容器宽，
+    // 曾经差的是高度（0.34 vs 0.46），看上去就像图的宽窄变了
+    const bars = renderScoreBars({
+      data: makeData(30),
+      hitLabels: HIT_LABELS,
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    const surv = renderSurvival({
+      scores: [1, 2, 3],
+      survival: [1, 0.5, 0],
+      title: 't',
+      tooltip: makeTooltip(),
+    });
+    expect(surv.getAttribute('viewBox')).toBe(bars.getAttribute('viewBox'));
   });
 
   /** 悬停第 i 列，返回浮框节点 */

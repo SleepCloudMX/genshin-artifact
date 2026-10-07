@@ -28,6 +28,7 @@ import {
   SLOTS,
   SLOT_NAMES,
   SUB_ATTRS,
+  GROWTH_ORDER,
   excludedAt,
   mainAttrsOf,
   type MainAttr,
@@ -36,8 +37,6 @@ import {
 } from '../core/stats';
 import {
   BUCKET_OPTIONS,
-  MAX_BARS,
-  autoBucketSize,
   bucketize,
   scoreDistribution,
   pmfByHit,
@@ -76,6 +75,7 @@ import {
   isExcludedByMain,
   nextWeightDown,
   nextWeightUp,
+  quantizeWeight,
   weightOnSelect,
   selectableAttrs,
   toSpec,
@@ -430,14 +430,14 @@ export function mount(root: HTMLElement): void {
     const warn = node('p', { class: 'hint warn', id: 'ignoredNote' });
     box.append(warn);
 
-    // 一个委托接三种交互：
-    //   change → 词条 / 初始档位两个下拉
-    //   input  → 权重数字框（边打字边出结果）
-    //   click  → 权重 − / +（按钮不产生 change/input，必须单独接）
+    // 一个委托接两种交互：
+    //   change → 词条 / 初始档位两个下拉，**以及权重数字框**
+    //   click  → 权重 − / +（按钮不产生 change，必须单独接）
+    //
+    // 权重框刻意**不接 `input`**：那样每敲一个字符就提交一次、整张表重建、
+    // 焦点被夺走 —— 连「清空重打」都做不到，也敲不出小数点（`0.` 会被重建掉）。
+    // 现在与原生表单一致：**回车或失焦才提交**。
     rows.addEventListener('change', onEdit);
-    rows.addEventListener('input', (ev) => {
-      if ((ev.target as HTMLElement).dataset['key'] === 'weight') onEdit(ev);
-    });
     rows.addEventListener('click', (ev) => {
       if ((ev.target as HTMLElement).dataset['key'] === 'step') onEdit(ev);
     });
@@ -469,8 +469,9 @@ export function mount(root: HTMLElement): void {
         }
         case 'weight': {
           const raw = (t as HTMLInputElement).value.trim();
-          // 允许中间态（空串 / 只有负号）：交给 toSpec 忽略，不要在这里抛错
-          cur.weight = raw === '' ? 0 : Number(raw);
+          // 允许中间态（空串 / 只有负号）：按 0 处理，交给 toSpec 忽略，不要在这里抛错。
+          // 归整到两位小数是**权重的唯一精度口径**，见 state.quantizeWeight。
+          cur.weight = raw === '' ? 0 : quantizeWeight(Number(raw));
           break;
         }
         case 'step': {
@@ -493,6 +494,18 @@ export function mount(root: HTMLElement): void {
           return;
       }
       setState({ slots });
+    }
+
+    /**
+     * 行结构的指纹：**主词条 + 每行的词条**。
+     *
+     * 它决定下拉里有哪些选项，也就决定「能不能原地改」——权重和档位只是值，
+     * 原地写回即可。
+     */
+    let structure = '';
+
+    function structureOf(): string {
+      return `${state.mainAttr}|${state.slots.map((s) => s.attr).join(',')}`;
     }
 
     function render(): void {
@@ -556,6 +569,25 @@ export function mount(root: HTMLElement): void {
         rows.append(r);
         syncRow(r, slot);
       });
+      structure = structureOf();
+    }
+
+    /**
+     * 不重建，只把 state 写回既有行。
+     *
+     * 正在被编辑的那个输入框**不覆盖**：回车提交时焦点还在框里，
+     * 覆盖会让光标跳到末尾（连续微调时很别扭）。
+     */
+    function syncRows(): void {
+      state.slots.forEach((slot, i) => {
+        const r = rows.children[i] as HTMLElement | undefined;
+        if (!r) return;
+        const sel = r.querySelector<HTMLSelectElement>('select[data-key="attr"]');
+        if (sel && sel.value !== slot.attr) sel.value = slot.attr;
+        const input = r.querySelector<HTMLInputElement>('input[data-key="weight"]');
+        if (input && document.activeElement !== input) input.value = String(slot.weight);
+        syncRow(r, slot);
+      });
     }
 
     /** 减号在 0 处禁用；档位下拉的标签跟着词条与权重走 */
@@ -569,7 +601,10 @@ export function mount(root: HTMLElement): void {
     return {
       box,
       refresh() {
-        render();
+        // 只有结构变了才重建。**不能无条件重建**：权重框失焦提交时还没事，
+        // 但回车提交时焦点仍在框里，重建会把它摘掉，下一次输入就落空了。
+        if (structureOf() === structure) syncRows();
+        else render();
         warn.textContent = C.ignoredNote(toSpec(state).ignored);
       },
     };
@@ -612,17 +647,16 @@ export function mount(root: HTMLElement): void {
   }
 
   /**
-   * 左下角的成长值表：列出**当前参与计分的词条**的四个成长档位。
+   * 左栏底部的成长值表：只列**当前参与计分**的词条。
    *
-   * 这些数字是**游戏内显示值**（只显示到一位小数）—— 不是我们取的整，
-   * 而是我们手上只有这个精度，所以累加后可能与官方的内部数值有细微出入。
-   * 摆在界面上是为了让「分数是怎么来的」可核对，而不是藏在代码里。
-   * 只列用到的词条，不把整张表糊上去。
+   * 全部 10 条词条的完整表在「得分分布 → 成长值」子 tab 里（`GROWTH_ORDER`），
+   * 这里留一张小的，是为了让「分数是怎么来的」在配置栏旁边就能核对，不用切走。
+   * 两处共用 `tierLabel`，数值不可能不一致。
    */
   function growthTableField(): { box: HTMLElement; refresh(): void } {
     const box = node('div', { class: 'panel growth-table' });
     box.append(node('h2', {}, C.GROWTH_TABLE_TITLE));
-    box.append(node('p', { class: 'hint' }, C.GROWTH_TABLE_HINT));
+    box.append(node('p', { class: 'hint' }, C.GROWTHS_HINT));
     const t = dataTable([C.TH_GROWTH_ATTR, ...C.TH_GROWTH_TIERS]);
     box.append(t.table);
 
@@ -666,23 +700,6 @@ export function mount(root: HTMLElement): void {
   // -------------------------------------------------------------------------
   // Tab 1：得分分布
   // -------------------------------------------------------------------------
-
-  /**
-   * 当前生效的分桶宽度。
-   *
-   * `state.bucketSize === 0` 表示用户还没显式选过 —— 此时按「柱数 ≤ MAX_BARS」
-   * 自动挑一档，保证默认视图不会糊成一片。用户改过就一律听用户的（哪怕柱子很密）。
-   */
-  function effectiveBucketSize(): number {
-    if (state.bucketSize > 0) return state.bucketSize;
-    return autoBucketSize(lastScores);
-  }
-
-  /**
-   * 最近一次算出的分数序列，供 `effectiveBucketSize` 自动挑档用。
-   * 分桶选择器在「概率分布」子 tab 渲染时读它，所以 `update()` 要先于渲染把它写新。
-   */
-  let lastScores: number[] = [];
 
   const growthTab: Tab = {
     id: 'growth',
@@ -741,17 +758,16 @@ export function mount(root: HTMLElement): void {
             p.box.classList.add('flush');
 
             // 分桶选择器：柱数太多时把相邻分数并成一根柱子。
-            // 默认值由 autoBucketSize 按「柱数 ≤ MAX_BARS」算，用户改了就用用户的。
+            // 默认 0.2 分（见 state.defaultGrowth），**不做自动挑档**：
+            // 自动挑的档会随输入悄悄变，看起来还是同一个视图，比例尺却换了。
             const tools = node('div', { class: 'chart-tools' });
             const label = node('label', { class: 'inline-field' });
             label.append(node('span', {}, C.BUCKET_LABEL));
             const sel = node('select', { id: 'bucketSize' });
             for (const size of BUCKET_OPTIONS) {
-              sel.append(
-                option(String(size), C.bucketSizeLabel(size), size === effectiveBucketSize()),
-              );
+              sel.append(option(String(size), C.bucketSizeLabel(size), size === state.bucketSize));
             }
-            sel.value = String(effectiveBucketSize());
+            sel.value = String(state.bucketSize);
             sel.addEventListener('change', () => {
               setState({ bucketSize: Number(sel.value) });
             });
@@ -862,6 +878,26 @@ export function mount(root: HTMLElement): void {
             );
           },
         },
+        {
+          /**
+           * 全部副词条的成长值。
+           *
+           * **纯参考表，不依赖任何计算结果**（也就不判 `table` 是否为空）：
+           * 它回答的是「这些分是怎么算出来的」，配置错到算不出分布时更应该看得到。
+           */
+          label: C.SUB_GROWTHS,
+          render(box) {
+            const p = panel('', C.SUB_GROWTHS_HINT);
+            const t = dataTable([C.TH_GROWTH_ATTR, ...C.TH_GROWTH_TIERS], 'growthsTable');
+            p.body.append(t.table);
+            box.append(p.box);
+            t.body.replaceChildren(
+              ...GROWTH_ORDER.map((attr) =>
+                row([attr, ...[0, 1, 2, 3].map((tier) => tierLabel(attr, tier))]),
+              ),
+            );
+          },
+        },
       ];
 
       const sub = mountSubTabs(bar, panels, subs);
@@ -882,11 +918,9 @@ export function mount(root: HTMLElement): void {
 
         const byHit = pmfByHit(table);
         hitLabels = Array.from({ length: table.hitBuckets }, (_, h) => C.hitLabel(h));
-        // 先写新分数序列，下面 `effectiveBucketSize()` 才知道该自动挑哪一档
-        lastScores = table.scores;
 
-        // 分桶：柱数超过上限就自动合并（用户显式选过则按用户的）
-        const size = effectiveBucketSize();
+        // 分桶：0.1 = 不合并
+        const size = state.bucketSize;
         barsBucketed = size > 0.1;
         bars = bucketize(
           table.scores,

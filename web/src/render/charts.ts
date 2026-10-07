@@ -76,17 +76,23 @@ export function niceAxis(max: number, targetTicks = 4): { max: number; step: num
 
 /**
  * 取 X 轴要标注的下标：最多 `maxLabels` 个，均匀分布且**必含首尾**。
- * 用「取整步长」而不是旋转 45° 的文字——分数有 200+ 个时旋转标签会糊成一片。
+ * 用「均分的刻度」而不是旋转 45° 的文字——分数有 200+ 个时旋转标签会糊成一片。
+ *
+ * 首尾各占一个名额、中间按 `(count - 1) / (maxLabels - 1)` 均分：
+ * 旧写法是「从 0 按取整步长铺，最后再补一格末尾」，补出来的那一格常常紧贴着
+ * 前一个刻度，两条轴标就叠在一起（66 根柱子时出现过 `52.854.4`）。
+ * 这种写法天然不会多出刻度，也不需要事后去重。
  *
  * 默认 8：柱状图下面还有图例，刻度太密会和柱子抢视线。
  */
 export function tickIndices(count: number, maxLabels = 8): number[] {
   if (count <= 0) return [];
   if (count <= maxLabels) return Array.from({ length: count }, (_, i) => i);
-  const stride = Math.ceil(count / maxLabels);
+  const step = (count - 1) / (maxLabels - 1);
   const out: number[] = [];
-  for (let i = 0; i < count; i += stride) out.push(i);
-  if (out[out.length - 1] !== count - 1) out.push(count - 1);
+  for (let i = 0; i < maxLabels; i++) out.push(Math.round(i * step));
+  // 抹掉 round 累积的偏差：末尾必须正好是最后一根
+  out[out.length - 1] = count - 1;
   return out;
 }
 
@@ -123,6 +129,16 @@ export function fitSize(
   const height = Math.round(Math.min(maxH, Math.max(minH, width * ratio)));
   return { width, height };
 }
+
+/**
+ * 「概率分布」与「达到概率」共用的画布尺寸。
+ *
+ * 两张图是同一个位置上互相切换的**兄弟视图**，尺寸必须一样：
+ * 一个 876×403、另一个 876×298，切过去会有「图的宽窄变了」的错觉
+ * —— 宽度其实一直是容器宽，差的是高度，但看上去就是不齐。
+ * 图内的留白仍由各自的 margin 决定（柱状图下面还有图例）。
+ */
+const SHARED_FIT = { ratio: 0.46, minH: 380, maxH: 620 } as const;
 
 // ---------------------------------------------------------------------------
 // 通用骨架
@@ -274,7 +290,7 @@ export interface ScoreChartOptions {
 export function renderScoreBars(opts: ScoreChartOptions): SVGSVGElement {
   const { data, hitLabels, title, marker, tooltip } = opts;
   // 柱状图下面还有图例，所以画布要高一点；图例占掉的高度另外扣
-  const fit = fitSize(opts.host, { ratio: 0.46, minH: 380, maxH: 620 });
+  const fit = fitSize(opts.host, SHARED_FIT);
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
   const legendRows = Math.ceil((hitLabels.length * 90) / 900) + 1;
@@ -433,17 +449,18 @@ function scoreTooltip(
 }
 
 /**
- * 分桶柱的区间写法，用数学区间：`[10.0, 11.0)`。
+ * 分桶柱的区间写法，用数学区间：`[10.0, 11.0) 分`。
  *
  * **左闭右开**，否则读的人不知道边界分数算在哪一根柱子上。
  * 桶宽按「起点 + 分桶宽度」算的是**名义**区间；桶里最后一个分数如果不到名义上界，
- * 也在括号里标出来，免得把 `[10.0, 10.8)` 读成「到 10.9 都有」。
+ * 也在括号里标出来，免得把 `[10.0, 10.8) 分` 读成「到 10.9 都有」。
+ * 末尾的「分」不能省：同一行上方还有 `10.0 分` 这种单点写法，单位要一致。
  */
 function bucketRangeLabel(d: StackedDatum): string {
   const min = d.range!.min;
   const max = d.range!.max;
   const hi = Math.round((max + 0.1) * 10) / 10;
-  return `[${min.toFixed(1)}, ${hi.toFixed(1)})`;
+  return `[${min.toFixed(1)}, ${hi.toFixed(1)}) 分`;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +493,9 @@ export interface SurvivalChartOptions {
 
 export function renderSurvival(opts: SurvivalChartOptions): SVGSVGElement {
   const { scores, survival, hitLabels, hitMix, hitMixCaption, title, marker, tooltip } = opts;
-  const fit = fitSize(opts.host, { ratio: 0.34, minH: 280, maxH: 460 });
+  // 尺寸与「概率分布」那张**完全一致**：两张图是同一个面板位置上的兄弟视图，
+  // 一大一小会显得没对齐（曾经是 0.34/280/460，比柱状图矮一截）。
+  const fit = fitSize(opts.host, SHARED_FIT);
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
   const f = frame({

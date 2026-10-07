@@ -83,6 +83,7 @@ export const SUB_DIST = '概率分布';
 export const SUB_SURVIVAL = '达到概率';
 export const SUB_HITS = '命中次数';
 export const SUB_QUANTILE = '分位分数线';
+export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
@@ -119,15 +120,17 @@ export function dropBreakdown(main: string, subs: string): string {
 export const DROP_OUT_OF_RANGE = '该部位没有这个主词条';
 
 // ---------------------------------------------------------------------------
-// 成长值表（左下角）—— 数值是我们用的口径，可能和游戏实际有出入
+// 成长值表（左栏小表 + 「成长值」子 tab）—— 数值口径只有这一处说明
 // ---------------------------------------------------------------------------
 
 export const GROWTH_TABLE_TITLE = '成长值';
 /**
- * 表头的说明。注意措辞：**不是我们做了取整**，而是游戏内就只显示到一位小数，
- * 我们手上只有这个数据。写成「已四舍五入」会把被动说成主动。
+ * 两句话都必须留：第一句交代**我们用的是哪个精度的值**（游戏内部值，两位小数，
+ * 不是游戏内显示的那位），第二句交代**为什么总分仍可能差 0.1**（显示精度）。
+ * 不要写成「已四舍五入」—— 那会把游戏的显示精度说成是我们主动砍的。
  */
-export const GROWTH_TABLE_HINT = '游戏内只显示到一位小数，故累加后与官方数值可能有细微出入。';
+export const GROWTHS_HINT = '成长值是游戏内部值（两位小数）。游戏内只显示到一位小数，故总分可能差 0.1。';
+export const SUB_GROWTHS_HINT = `全部副词条的成长值，得分 = Σ(成长值 × 权重)。${GROWTHS_HINT}`;
 export const TH_GROWTH_ATTR = '词条';
 export const TH_GROWTH_TIERS = ['一档', '二档', '三档', '四档'] as const;
 export const GROWTH_TABLE_EMPTY = '还没有计分词条。';

@@ -39,7 +39,7 @@ import {
 } from './stats';
 import { allPossibleAttrsProb, attrsProb } from './combo';
 
-/** 权重的整数刻度：与 `growth.SCALE` 同一个思路，得分按千分之一分累加 */
+/** 权重的整数刻度：这里只累加权重、不乘成长值，所以单独放大 1000 倍就够精确了 */
 export const WEIGHT_SCALE = 1000;
 
 export interface QualitySpec {

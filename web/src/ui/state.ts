@@ -62,10 +62,11 @@ export interface GrowthConfig {
   /** 目标分数（用于「要刷多少个」） */
   targetScore: number;
   /**
-   * 得分分布图的分桶宽度（分）。`0.1` = 不合并。
+   * 得分分布图的分桶宽度（分）。`0.1` = 不合并；**默认 `0.2`**。
    *
-   * 默认值由 `autoBucketSize` 按「柱数 ≤ 100」算出来，用户可以在「概率分布」
-   * 子 tab 里改；**显式改过的值会写进 URL**，分享出去看到的还是同一个视图。
+   * 与权重不同，这个值**不做自动挑选**：自动挑的档会随输入悄悄变，
+   * 看起来还是同一个视图，比例尺却换了。默认值在 `defaultGrowth` 里写死，
+   * 用户改了就用用户的，并写进 URL。
    */
   bucketSize: number;
 }
@@ -111,6 +112,18 @@ export function stepStart(attr: SubAttr | ''): number {
 /** 浮点加减后归整到两位小数，避免 `0.1` 反复累加攒出 `0.30000000000000004` */
 function round2(x: number): number {
   return Math.round(x * 100) / 100;
+}
+
+/**
+ * 权重的**唯一精度口径**：两位小数、非负。
+ *
+ * 输入框允许随便填（0.25 / .5 / 1.005），但进 state 之前一律归整到两位小数：
+ * `core/growth.ts` 把权重放大 100 倍成整数再乘成长值，多出来的位会被静默丢掉。
+ * 先归整，「界面上显示的值」与「真正参与运算的值」就永远是同一个。
+ * 归整后为 0 的（如 0.001）等同不计分，这与 `toSpec` 的「权重 > 0 才计分」一致。
+ */
+export function quantizeWeight(w: number): number {
+  return Number.isFinite(w) ? Math.max(0, round2(w)) : 0;
 }
 
 /**
@@ -162,8 +175,8 @@ export function defaultShared(): SharedConfig {
 }
 
 export function defaultGrowth(): GrowthConfig {
-  // bucketSize = 0 表示「还没显式选过」→ 由图表按柱数自动挑
-  return { initialVisible: 4, targetScore: 30, bucketSize: 0 };
+  // 分桶默认 0.2 分：0.1 在默认配置下有一百多根柱子，糊成一片
+  return { initialVisible: 4, targetScore: 30, bucketSize: 0.2 };
 }
 
 /** 完整默认状态（两个 tab 的配置合起来） */
@@ -200,6 +213,7 @@ export interface SpecResult {
  *
  * - 权重 > 0 的词条按 `SLOT_ORDER` 依次填进槽位；不足 4 个时剩下的槽位权重为 0
  *   （对应「这个词条不可能出现 / 出现了也不计分」，正好是 3 词条胚子第 4 条的语义）。
+ * - 权重先归整到两位小数（`quantizeWeight`），再判 > 0。
  * - 权重非法时**忽略该词条**而不是抛错：输入框可能正处在中间状态（空串、`-`）。
  */
 export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
@@ -217,8 +231,9 @@ export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
       ignored.push(attr);
       continue;
     }
-    if (weight <= 0) continue;
-    usable.push({ attr, weight, initialRoll });
+    const w = quantizeWeight(weight);
+    if (w <= 0) continue;
+    usable.push({ attr, weight: w, initialRoll });
   }
 
   usable.sort((a, b) => SLOT_ORDER.indexOf(a.attr) - SLOT_ORDER.indexOf(b.attr));
@@ -245,7 +260,9 @@ export function toSpec(state: SharedConfig & GrowthConfig): SpecResult {
 export function weightMap(state: SharedConfig): Partial<Record<SubAttr, number>> {
   const out: Partial<Record<SubAttr, number>> = {};
   for (const { attr, weight } of state.slots) {
-    if (attr !== '' && Number.isFinite(weight) && weight > 0) out[attr] = weight;
+    if (attr === '') continue;
+    const w = quantizeWeight(weight);
+    if (w > 0) out[attr] = w;
   }
   return out;
 }
@@ -256,7 +273,8 @@ export function weightMap(state: SharedConfig): Partial<Record<SubAttr, number>>
 
 /** 一个槽位在 query 里的写法：`词条:权重:档位`，`词条` 为空则整体省略 */
 function encodeSlot(s: SlotInput): string {
-  return `${s.attr}:${s.weight}:${s.initialRoll}`;
+  // 权重已归整到两位小数，`String` 不会再出现 0.30000000000000004 这类值
+  return `${s.attr}:${quantizeWeight(s.weight)}:${s.initialRoll}`;
 }
 
 export function toQuery(state: AppState): string {
@@ -266,8 +284,8 @@ export function toQuery(state: AppState): string {
   p.set('iv', String(state.initialVisible));
   p.set('target', String(state.targetScore));
   p.set('slots', state.slots.map(encodeSlot).join(','));
-  // `0` = 还没显式选过，按柱数自动挑；只有显式选过才写进链接
-  if (state.bucketSize > 0) p.set('bucket', String(state.bucketSize));
+  // 分桶一律写进链接（有默认值，不存在「没选过」的状态），分享出去是同一个视图
+  p.set('bucket', String(state.bucketSize));
   if (state.theme === 'dark') p.set('theme', 'dark');
   return p.toString();
 }
@@ -284,7 +302,7 @@ function decodeSlot(chunk: string): SlotInput {
 
   return {
     attr: attr === '' || (SUB_ATTRS as readonly string[]).includes(attr) ? attr : '',
-    weight: Number.isFinite(rawWeight) && rawWeight >= 0 ? rawWeight : 0,
+    weight: Number.isFinite(rawWeight) && rawWeight >= 0 ? quantizeWeight(rawWeight) : 0,
     initialRoll,
   };
 }

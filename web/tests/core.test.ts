@@ -34,10 +34,9 @@ import {
   scoreAtAlpha,
   tierLabel,
   BUCKET_OPTIONS,
-  MAX_BARS,
-  autoBucketSize,
   bucketize,
   type ArtifactSpec,
+  type DistributionTable,
   type Slot,
 } from '../src/core/growth';
 
@@ -71,9 +70,12 @@ describe('stats 权重表', () => {
     expect(statsFixture.subWeightSum).toBe(1100);
   });
 
-  it('成长值表与归档一致（原始量纲，小生命是 209 而非 2.09）', () => {
-    expect(baseline.stats.growths['小生命']).toEqual([209, 239, 269, 299]);
-    expect(baseline.stats.growths['暴击']).toEqual([2.7, 3.1, 3.5, 3.9]);
+  it('成长值用游戏内部值（两位小数，保留原始量纲：小生命是 209.13）', () => {
+    // 游戏内显示值只到一位小数（暴伤 5.4/6.2/7.0/7.8），累加会系统性偏高：
+    // 暴伤满档 6 次 = 7.77 × 6 = 46.62 → 显示 46.6；用显示值会算成 46.8。
+    expect(baseline.stats.growths['小生命']).toEqual([209.13, 239, 268.88, 298.75]);
+    expect(baseline.stats.growths['暴击']).toEqual([2.72, 3.11, 3.5, 3.89]);
+    expect(baseline.stats.growths['充能']).toEqual([4.53, 5.18, 5.83, 6.48]);
   });
 });
 
@@ -545,42 +547,59 @@ describe('分桶', () => {
   it('空输入不抛错', () => {
     expect(bucketize([], [], 1)).toEqual([]);
   });
-
-  it('autoBucketSize 保证柱数不超过上限', () => {
-    // 0.1 网格上铺 450 个分数（跨 45 分）
-    const scores: number[] = [];
-    for (let s = 108; s <= 557; s += 1) scores.push(s / 10);
-    expect(scores.length).toBeGreaterThan(MAX_BARS);
-
-    const size = autoBucketSize(scores);
-    const bars = bucketize(scores, scores.map(() => [1]), size);
-    expect(bars.length).toBeLessThanOrEqual(MAX_BARS);
-    // 挑的是「够用的最小档」：前一档会超限
-    const idx = BUCKET_OPTIONS.indexOf(size);
-    if (idx > 0) {
-      const smaller = bucketize(scores, scores.map(() => [1]), BUCKET_OPTIONS[idx - 1]!);
-      expect(smaller.length).toBeGreaterThan(MAX_BARS);
-    }
-  });
-
-  it('柱数本来就够少时不动（0.1 = 不合并）', () => {
-    expect(autoBucketSize([10.8, 11.0, 11.2])).toBe(0.1);
-  });
 });
 
 // ---------------------------------------------------------------------------
 // 分档文案
 // ---------------------------------------------------------------------------
 describe('初始档位的展示文案', () => {
-  it('固定一位小数 —— 7 和 7.0 语义不同，不要抹掉尾随的 0', () => {
-    expect([0, 1, 2, 3].map((t) => tierLabel('暴伤', t))).toEqual(['5.4', '6.2', '7.0', '7.8']);
-    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t))).toEqual(['2.7', '3.1', '3.5', '3.9']);
+  it('显示真实成长值（两位小数），整数分补一位小数', () => {
+    // 不再取整到一位小数：那样 5.44 会显示成 5.4，界面上读到的数与算分用的数就不一致了
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴伤', t))).toEqual(['5.44', '6.22', '6.99', '7.77']);
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t))).toEqual(['2.72', '3.11', '3.5', '3.89']);
   });
 
   it('带权重时显示「成长值 × 权重」（这一档值多少分）', () => {
-    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t, 2))).toEqual(['5.4', '6.2', '7.0', '7.8']);
-    // 小生命是原始量纲（209 等），权重 0.01 → 2.09 附近
-    expect(tierLabel('小生命', 0, 0.01)).toBe('2.1');
+    expect([0, 1, 2, 3].map((t) => tierLabel('暴击', t, 2))).toEqual(['5.44', '6.22', '7.0', '7.78']);
+    // 小数权重同样精确：小生命 209.13 × 0.01 = 2.0913
+    expect(tierLabel('小生命', 0, 0.01)).toBe('2.0913');
+    expect(tierLabel('暴击', 3, 0.25)).toBe('0.9725');
+    // 权重的精度口径是两位小数（core 按 ×100 取整）：0.333 按 0.33 算
+    expect(tierLabel('暴击', 3, 0.333)).toBe('1.2837');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 成长值口径
+// ---------------------------------------------------------------------------
+describe('成长值取游戏内部值（两位小数）', () => {
+  /** 只有第 1 个槽位计分，其余权重 0 */
+  function singleSlot(attr: SubAttr, visible: 3 | 4): DistributionTable {
+    const slots = [attr, DEAD, DEAD, DEAD].map((a, i) => ({
+      attr: a,
+      weight: i === 0 ? 1 : 0,
+      initialRoll: 'random' as const,
+    }));
+    return scoreDistribution({
+      slots: slots as unknown as ArtifactSpec['slots'],
+      initialVisible: visible,
+    });
+  }
+
+  it('暴伤满档 6 次 = 7.77 × 6 = 46.62 → 46.6（与游戏显示一致）', () => {
+    // 用游戏内显示值 7.8 会算成 46.8，高估 0.2 —— 这正是换表的理由
+    const t = singleSlot('暴伤', 4);
+    expect(t.scores[t.scores.length - 1]).toBe(46.6);
+  });
+
+  it('暴击率满档 6 次 = 3.89 × 6 = 23.34 → 23.3', () => {
+    const t = singleSlot('暴击', 4);
+    expect(t.scores[t.scores.length - 1]).toBe(23.3);
+  });
+
+  it('3 词条的满档是 5 次成长（第 1 次用于激活第 4 条）', () => {
+    const t = singleSlot('暴伤', 3);
+    expect(t.scores[t.scores.length - 1]).toBe(38.9); // 5 × 7.77 = 38.85 → 38.9
   });
 });
 

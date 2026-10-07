@@ -15,24 +15,33 @@
  *   - 命中的定义：`hits = Σ(计分槽位的次数) − 计分槽位数`，
  *     减掉的那部分就是掉落时的初始档位，不是「成长」。
  *
- * ## 数值口径：全部用整数（×1000）
+ * ## 数值口径：全部用整数
  *
  * 归档用浮点算分数、最后 `f'{score:.1f}'` 取整。那样**结果依赖二进制浮点误差**：
- * 例如 `4.1 + 2.09*5 = 14.55` 在浮点里是 `14.550000000000002` → 14.6，
- * 而精确十进制 14.55 按 round-half-even 应得 14.6、按 round-half-up 得 14.6/14.5 之争。
- * 同一条规则换个语言实现就会漂移。
+ * 例如 `4.08 + 2.0913*5 = 14.5365` 在浮点里的最后一位不可控，
+ * 落在 `.x5` 边界上就会取整到不同的 0.1。同一条规则换个语言实现就会漂移。
  *
- * 因此这里把一切都放大 1000 倍成整数：
- *   分数以「千分之一分」为单位；权重以「千分之一」为单位。
- * 成长值 `209 × 权重 0.01` → `209000 × 10 = 2090000`（精确），
+ * 因此这里把一切都换成正整数刻度，**一次浮点乘法都不做**：
+ *   - 成长值两位小数 → ×1000（`7.77` → `7770`）；
+ *   - 权重两位小数 → ×100（`0.25` → `25`）；
+ *   - 两者相乘即得「十万分之一分」为单位的整数（`7770 × 25 = 194250` → 1.9425 分）。
+ *
  * 最后一次性取整到 0.1，规则固定为**四舍五入（round-half-up）**。
  * 这样任何语言、任何顺序都得到同一张表。
+ *
+ * `weight` 在界面上被归整到两位小数（`ui/state.ts`），所以 ×100 不会丢位。
  */
 
 import { GROWTHS, UPGRADE_COUNT, type SubAttr } from './stats';
 
-/** 内部固定的放大倍数：分数与权重都 ×1000 */
-export const SCALE = 1000;
+/** 成长值的整数刻度：1 点 = 1000 个刻度（成长值最多两位小数） */
+const GROWTH_SCALE = 1000;
+
+/** 权重的整数刻度：1 = 100 个刻度（权重最多两位小数） */
+const WEIGHT_SCALE = 100;
+
+/** 分数的整数刻度：1 分 = 1e5 个刻度（= 成长值刻度 × 权重刻度） */
+export const SCORE_SCALE = GROWTH_SCALE * WEIGHT_SCALE;
 
 /** 成长档位数（四档）。固定初始档位时要按它补路径数，见 `slotTables` */
 export const TIER_COUNT = 4;
@@ -91,20 +100,25 @@ export interface DistributionTable {
 }
 
 /**
- * 把成长值转成整数刻度（×1000）。
+ * 成长值 → 整数刻度（×1000）。
  *
- * 注意这里**只放大成长值，不放大权重**：权重（0.1 / 0.5 / 1 / 2 …）与 ×1000 后的
- * 成长值相乘仍是精确整数，所以「先乘权重再合并同类项」全程无浮点误差。
+ * 成长值本身就是两位小数，所以这一步是精确的（`Math.round` 只是抹掉 `7.77 × 1000`
+ * 在二进制浮点里可能的 `7769.999…`）。
  */
 function growthScaled(g: number): number {
-  return Math.round(g * SCALE);
+  return Math.round(g * GROWTH_SCALE);
+}
+
+/** 权重 → 整数刻度（×100）。界面把权重归整到两位小数，所以这里同样精确 */
+function weightScaled(w: number): number {
+  return Math.round(w * WEIGHT_SCALE);
 }
 
 // ---------------------------------------------------------------------------
 // 各槽位「一共被成长 d 次」的 (加权得分, 序列数) 表
 //
 // 两个关键点：
-//   1. 先把成长值乘上槽位权重、再合并同类项（`g × w` 在整数刻度上是精确的）；
+//   1. 先把成长值乘上槽位权重、再合并同类项（两个整数相乘，永远精确）；
 //   2. 分数保持整数刻度，直到最后一步才取整到 0.1。
 //
 // 「一共被成长 d 次」= 掉落那一次 + 后续 (d-1) 次强化。掉落那次走**初始档位**
@@ -115,7 +129,8 @@ const slotTableCache = new Map<string, number[][]>();
 
 /** 一个槽位的四档成长值（已乘权重、整数刻度） */
 function tierValues(attr: SubAttr, weight: number): number[] {
-  return GROWTHS[attr].map((g) => growthScaled(g) * weight);
+  const w = weightScaled(weight);
+  return GROWTHS[attr].map((g) => growthScaled(g) * w);
 }
 
 /** 把「(和, 权重) 表」按一个档位表再卷积一次 */
@@ -158,7 +173,8 @@ function flatten(acc: Map<number, number>): number[] {
  * 所以它的第一次也是「四档随机」，不是「纯成长」。
  */
 function slotTables(attr: SubAttr, weight: number, initialRoll: InitialRoll): number[][] {
-  const key = `${attr}|${weight}|${initialRoll}`;
+  // 键用**归整后的**权重：0.5 与 0.50 是同一张表，不要各缓存一份
+  const key = `${attr}|${weightScaled(weight)}|${initialRoll}`;
   const cached = slotTableCache.get(key);
   if (cached) return cached;
 
@@ -182,16 +198,32 @@ function slotTables(attr: SubAttr, weight: number, initialRoll: InitialRoll): nu
   return tables;
 }
 /**
- * 某词条「成长到第 t 档」的展示文案，如 `2.7`；带权重时显示计分值，如权重 2 → `5.4`。
+ * 整数刻度 → 文案：最多 5 位小数、去掉末尾多余的 0，**至少保留一位小数**。
  *
- * **固定一位小数，不要把尾随的 0 去掉**：成长值只有游戏内显示的这一个精度
- * （暴伤四档是 5.4 / 6.2 / 7.0 / 7.8），`7` 和 `7.0` 表达的有效位数不同，
- * 而「7.0」才是数据本身的样子。同理权重 2 的暴击是 5.4 / 6.2 / 7.0 / 7.8。
+ * 直接按整数拆位而不是 `(units / 1e5).toFixed(...)`：那样又绕回浮点。
+ * 保留一位小数是为了让 `7` 显示成 `7.0` —— 它是两位小数的成长值算出来的一个「分」值，
+ * 写成整数会让人以为是另一类数。
+ */
+function unitsText(units: number): string {
+  const sign = units < 0 ? '-' : '';
+  const u = Math.round(Math.abs(units));
+  const whole = Math.floor(u / SCORE_SCALE);
+  const frac = String(u % SCORE_SCALE)
+    .padStart(5, '0')
+    .replace(/0+$/, '');
+  return `${sign}${whole}.${frac === '' ? '0' : frac}`;
+}
+
+/**
+ * 某词条「成长到第 t 档」的展示文案，如 `2.72`；带权重时显示计分值，如权重 2 → `5.44`。
+ *
+ * 走的是**和计算同一套整数刻度**，所以界面上读到的数与真正参与运算的数不可能不一致
+ * （`2.72 × 0.25` 显示 `0.68`，运算也是 `0.68`）。
  */
 export function tierLabel(attr: SubAttr, tier: number, weight = 1): string {
   const g = GROWTHS[attr][tier as 0 | 1 | 2 | 3];
   if (g === undefined) return '—';
-  return (g * weight).toFixed(1);
+  return unitsText(growthScaled(g) * weightScaled(weight));
 }
 
 // ---------------------------------------------------------------------------
@@ -293,16 +325,16 @@ export function totalOf(initialVisible: InitialVisible): number {
 // ---------------------------------------------------------------------------
 
 /**
- * 千分之一分 → 十分之一分（一位小数对应的整数刻度）。
+ * 十万分之一分 → 十分之一分（一位小数对应的整数刻度）。
  *
- * 分数刻度是 ×1000，所以一「十分之一分」= 100 个刻度。
  * 全程整数运算，规则固定为**四舍五入**，不依赖浮点误差。
- * 例：10800（= 10.8 分）→ 108；14550（= 14.55 分）→ 146 → 14.6 分。
+ * 例：1080000（= 10.8 分）→ 108；1455000（= 14.55 分）→ 146 → 14.6 分。
  */
 function tenthsOf(scaledScore: number): number {
-  const q = Math.floor(scaledScore / 100);
-  const r = scaledScore - q * 100;
-  return r >= 50 ? q + 1 : q;
+  const tenth = SCORE_SCALE / 10;
+  const q = Math.floor(scaledScore / tenth);
+  const r = scaledScore - q * tenth;
+  return r * 2 >= tenth ? q + 1 : q;
 }
 
 /** 计算强化后得分分布 */
@@ -463,36 +495,17 @@ export function hitMixAtLeast(table: DistributionTable, i: number): number[] {
  * 为什么是离散档位而不是「随便填一个 d」：桶边界要对齐到 d 的整数倍，
  * 否则同一个桶在不同配置下含义会变（`[20.7, 21.6]` 这种）。对齐之后
  * `[20.0, 20.9]` 这种含义稳定的桶只有 d ∈ {0.1, 0.2, 0.5, 1, 2, 5…} 能得到，
- * 所以做成可选档位反而更清楚。最常用的是 `1`。
+ * 所以做成可选档位反而更清楚。
+ *
+ * **默认 0.2**（见 `ui/state.ts` 的 `defaultGrowth`）：0.1 在默认配置下有一百多根柱子，
+ * 糊成一片；再粗就看不到分布形状了。这里不做「按柱数自动挑档」——
+ * 自动挑的档会随输入悄悄变，用户以为在看同一个视图，实际比例尺已经换了。
  */
 export const BUCKET_OPTIONS = [0.1, 0.2, 0.5, 1, 2, 5] as const;
 export type BucketSize = (typeof BUCKET_OPTIONS)[number];
 
-/** 柱数上限：超过这个数就该分桶了（也是自动挑选的依据） */
-export const MAX_BARS = 100;
-
 export function isBucketSize(v: unknown): v is BucketSize {
   return (BUCKET_OPTIONS as readonly number[]).includes(v as number);
-}
-
-/** 覆盖 `[lo, hi]` 需要多少个宽度为 `size` 的对齐桶 */
-function bucketCount(lo: number, hi: number, size: number): number {
-  return Math.floor(hi / size + 1e-9) - Math.floor(lo / size + 1e-9) + 1;
-}
-
-/**
- * 按「柱数不超过 `maxBars`」自动挑最小的分桶宽度。
- *
- * 分数本身就是 0.1 的倍数，所以不会出现比 0.1 更细的需求：**取到 0.1 即「不合并」**。
- */
-export function autoBucketSize(scores: readonly number[], maxBars = MAX_BARS): BucketSize {
-  if (scores.length <= maxBars) return 0.1;
-  const lo = scores[0]!;
-  const hi = scores[scores.length - 1]!;
-  for (const size of BUCKET_OPTIONS) {
-    if (bucketCount(lo, hi, size) <= maxBars) return size;
-  }
-  return BUCKET_OPTIONS[BUCKET_OPTIONS.length - 1]!;
 }
 
 export interface ScoreBucket {
