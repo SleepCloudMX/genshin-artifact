@@ -1061,6 +1061,20 @@ describe('热力图（主词条 × 副词条）', () => {
     const svg = renderHeatmap({ rows: [], cols, tooltip: makeTooltip() });
     expect(svg.querySelectorAll('rect.hm-cell')).toHaveLength(0);
   });
+
+  it('行数少的表可以要一块更扁的画布（三行的「部位 × 主词条」）', () => {
+    const height = (svg: SVGSVGElement): number =>
+      Number(svg.getAttribute('viewBox')!.split(' ')[3]);
+    const tall = renderHeatmap({ rows, cols, tooltip: makeTooltip() });
+    const flat = renderHeatmap({ rows: rows.slice(0, 3), cols, cellMaxH: 56, ratio: 0.28, tooltip: makeTooltip() });
+    // 同一个容器宽度下，扁的那张矮一截 —— 免得三行格子上下各空一大片
+    expect(flat.getAttribute('viewBox')!.split(' ')[2]).toBe(tall.getAttribute('viewBox')!.split(' ')[2]);
+    expect(height(flat)).toBeLessThan(height(tall));
+    // 格子高度仍由 `cellMaxH` 管
+    const cellH = (svg: SVGSVGElement): number =>
+      Number(svg.querySelector('rect.hm-cell')!.getAttribute('height'));
+    expect(cellH(flat)).toBeLessThanOrEqual(56);
+  });
 });
 
 describe('环形图', () => {

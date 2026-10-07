@@ -77,6 +77,14 @@ export interface HeatmapOptions {
   colAxis?: string;
   /** 行数少时别把格子拉成一整块（「部位 × 主词条」只有三行） */
   cellMaxH?: number;
+  /**
+   * 画布高 / 宽的期望比例，默认 0.44。
+   *
+   * 行数少的表要更扁：三行格子最多 168px 高，塞进 500px 高的绘图区会上下各空一大片
+   * （中间那栏放宽之后更明显）。格子高度仍归 `cellMaxH` 管，两者互不影响 ——
+   * 一个管画布，一个管格子。
+   */
+  ratio?: number;
   title?: string;
   host?: HTMLElement | null;
   width?: number;
@@ -86,7 +94,7 @@ export interface HeatmapOptions {
 
 export function renderHeatmap(opts: HeatmapOptions): SVGSVGElement {
   const { rows, cols, tooltip } = opts;
-  const fit = fitSize(opts.host, { ratio: 0.44, minH: 340, maxH: 620 });
+  const fit = fitSize(opts.host, { ratio: opts.ratio ?? 0.44, minH: 340, maxH: 620 });
   const width = opts.width ?? fit.width;
   const height = opts.height ?? fit.height;
 

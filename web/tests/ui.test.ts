@@ -495,7 +495,7 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelectorAll('.sidebar .tree .tab')).toHaveLength(3);
     expect(
       [...root.querySelectorAll('.sidebar .tab')].map((b) => b.textContent),
-    ).toEqual([C.TAB_GROWTH, C.TAB_QUALITY, C.TAB_MORE]);
+    ).toEqual([C.TAB_GROWTH, C.TAB_QUALITY, C.TAB_BASIC]);
     expect(root.querySelector('#tab-growth')!.classList.contains('on')).toBe(true);
     // 三块结果面板都挂着（切回来时各自的 update 闭包要认自己的节点），只有当前那块可见
     expect(root.querySelectorAll('.tab-panel')).toHaveLength(3);
@@ -539,8 +539,8 @@ describe('主 tab 与子 tab', () => {
     clickTab(root, 'quality');
     expect(config.querySelector('#initialVisible')).toBeNull();
     expect(config.querySelector('#qualityRows')).not.toBeNull();
-    // 「更多」不需要配置 → 整栏收掉，宽度让给图表
-    clickTab(root, 'more');
+    // 「基础概率」不需要配置（两张表与配置无关）→ 整栏收掉，宽度让给图表
+    clickTab(root, 'basic');
     expect(config.hidden).toBe(true);
     expect(layout.classList.contains('no-config')).toBe(true);
   });
@@ -676,7 +676,7 @@ describe('主 tab 与子 tab', () => {
     // 初始档位是强化才有的事 → 「胚子质量」不显示这一列
     expect(root.querySelector('#slotRows select[data-key="roll"]')).toBeNull();
 
-    clickTab(root, 'more');
+    clickTab(root, 'basic');
     expect(root.querySelector('#slotRows')).toBeNull();
 
     clickTab(root, 'growth');
@@ -700,23 +700,21 @@ describe('主 tab 与子 tab', () => {
     expect(root.querySelector('[data-tab="quality"]')).not.toBeNull();
   });
 
-  it('「更多」tab 有内容', () => {
+  it('「更多 / 待做」整页删掉：待做不属于网页', () => {
     const root = freshRoot();
     mount(root);
-    clickTab(root, 'more');
-    expect(root.querySelectorAll('[data-tab="more"] ul.todo li').length).toBeGreaterThan(0);
+    // 作者 2026-10-08：「“更多” 删了，这页没用。待做也不应该放在网页里。」
+    expect(root.querySelector('#tab-more')).toBeNull();
+    expect(root.querySelector('[data-tab="more"]')).toBeNull();
+    expect(root.querySelector('ul.todo')).toBeNull();
+    expect(root.textContent).not.toContain('待做');
   });
 
-  it('胚子质量页有四个子 tab，「组合概率」在第一个', () => {
+  it('胚子质量页有三个子 tab，「组合概率」在第一个', () => {
     const root = freshRoot();
     mount(root);
     clickTab(root, 'quality');
-    expect(subLabels(root)).toEqual([
-      C.SUB_COMBOS,
-      C.SUB_QUALITY_DIST,
-      C.SUB_ATTRS,
-      C.SUB_MAIN_SUB,
-    ]);
+    expect(subLabels(root)).toEqual([C.SUB_COMBOS, C.SUB_QUALITY_DIST, C.SUB_ATTRS]);
     // 默认只渲染第一个：组合概率的饼
     expect(visibleSubPanel(root).querySelectorAll('svg.pie path.pie-slice').length).toBeGreaterThan(0);
 
@@ -727,10 +725,27 @@ describe('主 tab 与子 tab', () => {
 
     clickSub(root, C.SUB_ATTRS);
     expect(visibleSubPanel(root).querySelectorAll('table.data tbody tr').length).toBeGreaterThan(0);
+  });
 
-    clickSub(root, C.SUB_MAIN_SUB);
-    expect(visibleSubPanel(root).querySelector('#mainProbChart svg')).not.toBeNull();
-    expect(visibleSubPanel(root).querySelector('#substatHeatmap svg')).not.toBeNull();
+  it('「基础概率」是两个子 tab：部位 × 主词条、主词条 × 副词条各一张表', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    expect(subLabels(root)).toEqual([C.SUB_BASIC_MAIN, C.SUB_BASIC_SUB]);
+    // 一张图一个子 tab：第一个子 tab 里**只有**第一张表，两张不再同框
+    const first = visibleSubPanel(root);
+    expect(first.querySelector('#mainProbChart svg')).not.toBeNull();
+    expect(first.querySelector('#substatHeatmap')).toBeNull();
+
+    clickSub(root, C.SUB_BASIC_SUB);
+    const second = visibleSubPanel(root);
+    expect(second.querySelector('#substatHeatmap svg')).not.toBeNull();
+    expect(second.querySelector('#mainProbChart')).toBeNull();
+    // 侧边栏把这两个子任务列在「基础概率」下面（与图表上方那一排同一份状态）
+    expect([...root.querySelectorAll('.sidebar .tree-sub')].map((b) => b.textContent)).toEqual([
+      C.SUB_BASIC_MAIN,
+      C.SUB_BASIC_SUB,
+    ]);
   });
 
   it('组合概率：标注画在图上，得分最高的那一项被摘出来', () => {
@@ -959,14 +974,13 @@ describe('主 tab 与子 tab', () => {
     expect(chart.querySelectorAll('rect.bar-seg').length).toBeGreaterThan(0);
   });
 
-  it('「主词条 · 副词条」：部位 × 主词条 + 主词条 × 副词条两张表，数字与配置无关', () => {
+  it('「部位 × 主词条」：三行 × 十六列，数字与配置无关', () => {
     const root = freshRoot();
     mount(root);
-    clickTab(root, 'quality');
-    clickSub(root, C.SUB_MAIN_SUB);
+    clickTab(root, 'basic');
     const panel = visibleSubPanel(root);
 
-    // ① 部位 × 主词条：3 行（沙 / 杯 / 头，花羽主词条固定不列）× 16 列
+    // 沙 / 杯 / 头 三行（花羽主词条固定，不列）× 16 列
     const cells = panel.querySelectorAll('#mainProbChart rect.hm-cell');
     expect(cells).toHaveLength(3 * 16);
     const cellText = (row: string, col: string) =>
@@ -983,36 +997,55 @@ describe('主 tab 与子 tab', () => {
         .classList.contains('hm-hole'),
     ).toBe(true);
     expect(cellText('沙', '火伤')).toBe('—');
+  });
 
-    // ② 主词条 × 副词条：10 × 10，当前主词条（火伤 → 其他）那一行高亮
-    expect(panel.querySelectorAll('#substatHeatmap rect.hm-cell')).toHaveLength(100);
-    expect(panel.querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe('其他');
-
-    // 配置换掉之后，两张表的**数字**一格都不变（这一页不需要配置），
-    // 只有「你现在选的是这一格」那个框跟着走
-    const before = [...panel.querySelectorAll('#mainProbChart text.hm-value')]
+  it('「部位 × 主词条」：换配置时数字一格不变，只有「你选的是这一格」的框跟着走', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    const before = [...visibleSubPanel(root).querySelectorAll('#mainProbChart text.hm-value')]
       .map((t) => t.textContent)
       .join(',');
-    const beforeBox = panel.querySelector('rect.hm-cell-box')!.getAttribute('x');
+    const beforeBox = visibleSubPanel(root).querySelector('rect.hm-cell-box')!.getAttribute('x');
+
+    // 这一页没有配置栏，所以「改配置」是在别的任务里发生的 —— 回到这一页要重画
+    clickTab(root, 'growth');
     pickSlotAndMain(root, '头', '暴击');
+    clickTab(root, 'basic');
+
     const after = [...visibleSubPanel(root).querySelectorAll('#mainProbChart text.hm-value')]
       .map((t) => t.textContent)
       .join(',');
     expect(after).toBe(before);
     const box2 = visibleSubPanel(root).querySelector('rect.hm-cell-box')!;
     expect(box2.getAttribute('x')).not.toBe(beforeBox);
-    // 副词条那张的高亮行也跟着换成暴击
-    expect(visibleSubPanel(root).querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe(
-      '暴击',
-    );
+  });
+
+  it('「主词条 × 副词条」：十行 × 十列，当前主词条那一行高亮', () => {
+    const root = freshRoot();
+    mount(root);
+    clickTab(root, 'basic');
+    clickSub(root, C.SUB_BASIC_SUB);
+    const panel = visibleSubPanel(root);
+    // 默认主词条是火伤 → 走「其他」那一行
+    expect(panel.querySelectorAll('#substatHeatmap rect.hm-cell')).toHaveLength(100);
+    expect(panel.querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe('其他');
+
+    clickTab(root, 'growth');
+    pickSlotAndMain(root, '头', '暴击');
+    clickTab(root, 'basic');
+    clickSub(root, C.SUB_BASIC_SUB);
+    expect(
+      visibleSubPanel(root).querySelector('#substatHeatmap text.hm-row-label.on')!.textContent,
+    ).toBe('暴击');
   });
 
   it('花 / 羽 不在「部位 × 主词条」里（主词条固定，没有可比较的概率）', () => {
     const root = freshRoot();
     mount(root);
-    clickTab(root, 'quality');
-    clickSub(root, C.SUB_MAIN_SUB);
+    clickTab(root, 'growth');
     pickSlotAndMain(root, '花', '小生命');
+    clickTab(root, 'basic');
     const panel = visibleSubPanel(root);
     // 行还是沙 / 杯 / 头三行，且**没有**「你现在选的是这一格」的框（花不在表里）
     expect([...panel.querySelectorAll('#mainProbChart text.hm-row-label')].map((t) => t.textContent)).toEqual(
@@ -1020,7 +1053,10 @@ describe('主 tab 与子 tab', () => {
     );
     expect(panel.querySelector('#mainProbChart rect.hm-cell-box')).toBeNull();
     // 副词条那张照样高亮「小生命」那一行
-    expect(panel.querySelector('#substatHeatmap text.hm-row-label.on')!.textContent).toBe('小生命');
+    clickSub(root, C.SUB_BASIC_SUB);
+    expect(
+      visibleSubPanel(root).querySelector('#substatHeatmap text.hm-row-label.on')!.textContent,
+    ).toBe('小生命');
   });
 
   it('胚子质量的默认权重是暴击 3 / 暴伤 3 / 精通 2 / 大攻击 2', () => {
@@ -1161,8 +1197,8 @@ describe('页面文案', () => {
     expect(title()).toBe(C.TAB_GROWTH);
     clickTab(root, 'quality');
     expect(title()).toBe(C.TAB_QUALITY);
-    clickTab(root, 'more');
-    expect(title()).toBe(C.TAB_MORE);
+    clickTab(root, 'basic');
+    expect(title()).toBe(C.TAB_BASIC);
     // 每个面板各有一条，不是共用的一个标题被搬来搬去
     expect(root.querySelectorAll('.tab-title')).toHaveLength(3);
   });
@@ -1261,7 +1297,7 @@ describe('页面文案', () => {
   it('页面里不残留 Markdown 记号', () => {
     const root = freshRoot();
     mount(root);
-    for (const id of ['growth', 'quality', 'more']) {
+    for (const id of ['growth', 'quality', 'basic']) {
       clickTab(root, id);
       const panel = root.querySelector(`[data-tab="${id}"]`)!;
       const text = (panel.textContent ?? '') + (root.querySelector('#config')!.textContent ?? '');

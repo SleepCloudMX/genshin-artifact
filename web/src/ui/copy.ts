@@ -92,7 +92,7 @@ export function ignoredNote(attrs: string[]): string {
 
 export const TAB_GROWTH = '得分分布';
 export const TAB_QUALITY = '胚子质量';
-export const TAB_MORE = '更多';
+export const TAB_BASIC = '基础概率';
 
 // ---------------------------------------------------------------------------
 // 子 tab
@@ -106,8 +106,14 @@ export const SUB_GROWTHS = '成长值';
 export const SUB_QUALITY_DIST = '质量分布';
 export const SUB_COMBOS = '组合概率';
 export const SUB_ATTRS = '词条概率';
-/** 「主词条 · 副词条」：部位 × 主词条、主词条 × 副词条两张概率表（都与配置无关） */
-export const SUB_MAIN_SUB = '主词条 · 副词条';
+/**
+ * 「基础概率」的两个子 tab：掉落是怎么抽出来的，两张二维概率表。
+ *
+ * 名字直接写两个维度（行 × 列），比「主词条概率」这种叫法更清楚 ——
+ * 表里读的是「这两个维度交叉起来是个什么数」。
+ */
+export const SUB_BASIC_MAIN = '部位 × 主词条';
+export const SUB_BASIC_SUB = '主词条 × 副词条';
 
 /** 第一张：部位 × 主词条的二维概率表 */
 export const MAIN_PROB_TITLE = '各部位的主词条概率';
@@ -266,11 +272,5 @@ export function qualityNote(mainAttr: string, dropped: string | undefined, attrC
   if (attrCount === 0) parts.push('未填写计分词条');
   return parts.join(' · ');
 }
-
-export const MORE_TITLE = '待做';
-export const MORE_ITEMS: readonly string[] = [
-  '3 / 4 词条混合掉落（比例可配）',
-  '图表导出 PNG / SVG',
-];
 
 export const CALC_FAILED = '计算失败：';

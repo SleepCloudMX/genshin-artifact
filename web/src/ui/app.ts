@@ -314,9 +314,9 @@ interface Tab {
   id: string;
   label: string;
   /**
-   * 左栏……不，是**右栏**：这个任务需要什么配置。
+   * 右栏：这个任务需要什么配置。
    *
-   * **省略 = 这个任务不需要配置**（如「更多」），那一栏整栏收掉。
+   * **省略 = 这个任务不需要配置**（如「基础概率」：两张表和配置无关），那一栏整栏收掉。
    * 配置是任务的属性，所以它跟着任务走，而不是一组全局控件。
    */
   controls?(host: HTMLElement, ctx: TabCtx): void;
@@ -1527,76 +1527,6 @@ export function mount(root: HTMLElement): void {
             );
           },
         },
-        {
-          /**
-           * 「主词条 · 副词条」：**掉落是怎么抽出来的**。两张二维概率表，都与配置无关 ——
-           * 部位 / 主词条在这里是表格的维度，不是你填的输入。
-           *
-           * 第一张：部位（纵）× 主词条（横），格 = P(该部位出该主词条)；
-           * 第二张：主词条（纵）× 副词条（横），格 = 「下一条副词条是该词条」的概率
-           * （热力图那套逐条抽取的口径，不是「词条概率」子 tab 的「4 条里含有它」）。
-           *
-           * 第二张悬停某格会给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
-           */
-          label: C.SUB_MAIN_SUB,
-          render(box) {
-            // ① 部位 × 主词条：行是沙 / 杯 / 头，列是所有能当主词条的词条
-            const p1 = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
-            p1.box.classList.add('flush');
-            const chart1 = node('div', { class: 'chart-wrap', id: 'mainProbChart' });
-            p1.body.append(chart1);
-            box.append(p1.box);
-            chart1.append(
-              renderHeatmap({
-                rows: mainAttrHeatmap(),
-                cols: MAIN_ATTR_COLS,
-                // 把「你现在选的那一格」框出来：概率与配置无关，这只是个位置提示
-                ...(hasRandomMain(state.slot)
-                  ? { highlightRow: state.slot, highlightCol: state.mainAttr }
-                  : {}),
-                rowAxis: C.MAIN_PROB_ROW_AXIS,
-                colAxis: C.MAIN_PROB_COL_AXIS,
-                // 只有三行，格子别拉成一整块
-                cellMaxH: 56,
-                host: chart1,
-                tooltip: tabCtx.tooltip,
-              }),
-            );
-
-            // ② 主词条 × 副词条
-            const rows = substatHeatmap();
-            const p2 = panel(C.HEAT_TITLE, C.HEAT_HINT);
-            p2.box.classList.add('flush');
-            const chart2 = node('div', { class: 'chart-wrap', id: 'substatHeatmap' });
-            p2.body.append(chart2);
-            box.append(p2.box);
-            chart2.append(
-              renderHeatmap({
-                rows,
-                cols: SUB_ATTRS,
-                highlightRow: heatRowKey(state.mainAttr),
-                // 浮框里的条：把「这一格已经抽走」代进模型，得到再下一条的分布。
-                // 条长按本组最大值折算（这几个概率都在 10% 上下，按原值画全是一小截），
-                // 所以 `nextCaption` 必须写明这件事。
-                nextBars: (row, col) => {
-                  const next = nextSubstatDist(row.key as MainAttr, [col as SubAttr]);
-                  const peak = Math.max(...next.map((d) => d.p));
-                  return next.map((d) => ({
-                    label: d.attr,
-                    fraction: d.p / peak,
-                    value: pct(d.p, 2),
-                    color: categoricalColor(0),
-                  }));
-                },
-                nextCaption: C.HEAT_NEXT_CAPTION,
-                rowAxis: C.HEAT_ROW_AXIS,
-                colAxis: C.HEAT_COL_AXIS,
-                host: chart2,
-                tooltip: tabCtx.tooltip,
-              }),
-            );
-          },
-        },
       ];
 
       const sub = mountSubTabs(bar, panels, subs, tabCtx);
@@ -1635,26 +1565,111 @@ export function mount(root: HTMLElement): void {
   };
 
   // -------------------------------------------------------------------------
-  // Tab 3：占位
+  // Tab 3：基础概率
   // -------------------------------------------------------------------------
 
-  const moreTab: Tab = {
-    id: 'more',
-    label: C.TAB_MORE,
-    // **不需要配置**：侧边栏这一页右边那一栏会整栏收掉（`selectTab` 里判断）
-    mount(host) {
-      const p = panel(C.MORE_TITLE);
-      const list = node('ul', { class: 'todo' });
-      for (const item of C.MORE_ITEMS) list.append(node('li', {}, item));
-      p.body.append(list);
-      host.append(p.box);
+  /**
+   * 「基础概率」：**掉落是怎么抽出来的**。两张二维概率表，都与配置无关 ——
+   * 部位 / 主词条在这里是表格的维度，不是你填的输入。
+   *
+   * ① 部位（纵）× 主词条（横）：格 = P(该部位出该主词条)；
+   * ② 主词条（纵）× 副词条（横）：格 = 「下一条副词条是该词条」的概率
+   *    （热力图那套逐条抽取的口径，不是「词条概率」子 tab 的「4 条里含有它」），
+   *    悬停某格给出**再下一条**的分布：同一套「加权不放回」模型往下走一层。
+   *
+   * 两张表各占一个子 tab（作者 2026-10-08：「这两张图放在两个子 tab 里」）：
+   * 它们回答的是两个不同的问题，并排摆会把两张 16 列的宽表都压窄。
+   */
+  const basicTab: Tab = {
+    id: 'basic',
+    label: C.TAB_BASIC,
+    // **不需要配置**：两张表与配置无关（部位 / 主词条在这里是表的维度）。
+    // 省略 `controls` → 右栏整栏收掉，宽度让给这两张宽表（见 `selectTab`）。
+
+    mount(host, tabCtx) {
+      const panels = node('div', { class: 'subtab-panels' });
+      const bar = node('div', { class: 'subtabs', role: 'tablist' });
+
+      const subs: SubTab[] = [
+        {
+          label: C.SUB_BASIC_MAIN,
+          render(box) {
+            const p = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'mainProbChart' });
+            p.body.append(chart);
+            box.append(p.box);
+            chart.append(
+              renderHeatmap({
+                rows: mainAttrHeatmap(),
+                cols: MAIN_ATTR_COLS,
+                // 把「你现在选的那一格」框出来：概率与配置无关，这只是个位置提示
+                ...(hasRandomMain(state.slot)
+                  ? { highlightRow: state.slot, highlightCol: state.mainAttr }
+                  : {}),
+                rowAxis: C.MAIN_PROB_ROW_AXIS,
+                colAxis: C.MAIN_PROB_COL_AXIS,
+                // 只有三行：格子别拉成一整块，画布也要扁一些（否则上下各空一大片）
+                cellMaxH: 56,
+                ratio: 0.28,
+                host: chart,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
+        {
+          label: C.SUB_BASIC_SUB,
+          render(box) {
+            const p = panel(C.HEAT_TITLE, C.HEAT_HINT);
+            p.box.classList.add('flush');
+            const chart = node('div', { class: 'chart-wrap', id: 'substatHeatmap' });
+            p.body.append(chart);
+            box.append(p.box);
+            chart.append(
+              renderHeatmap({
+                rows: substatHeatmap(),
+                cols: SUB_ATTRS,
+                highlightRow: heatRowKey(state.mainAttr),
+                // 浮框里的条：把「这一格已经抽走」代进模型，得到再下一条的分布。
+                // 条长按本组最大值折算（这几个概率都在 10% 上下，按原值画全是一小截），
+                // 所以 `nextCaption` 必须写明这件事。
+                nextBars: (row, col) => {
+                  const next = nextSubstatDist(row.key as MainAttr, [col as SubAttr]);
+                  const peak = Math.max(...next.map((d) => d.p));
+                  return next.map((d) => ({
+                    label: d.attr,
+                    fraction: d.p / peak,
+                    value: pct(d.p, 2),
+                    color: categoricalColor(0),
+                  }));
+                },
+                nextCaption: C.HEAT_NEXT_CAPTION,
+                rowAxis: C.HEAT_ROW_AXIS,
+                colAxis: C.HEAT_COL_AXIS,
+                host: chart,
+                tooltip: tabCtx.tooltip,
+              }),
+            );
+          },
+        },
+      ];
+
+      const sub = mountSubTabs(bar, panels, subs, tabCtx);
+      host.append(bar, panels);
+
+      // 两张表的**数字**与配置无关，但「你现在选的是这一格 / 这一行」的框跟着走：
+      // 别的任务里改了部位或主词条，回到这一页（或正在这一页）都要重画。
+      this.update = () => sub.refresh();
     },
   };
+
+  // -------------------------------------------------------------------------
 
   /**
    * 装配子 tab：`bar` 放按钮，`panels` 放内容。
    *
-   * **只渲染当前可见的那个**：四个子 tab 里有三张图，全部渲染等于白算三遍
+   * **只渲染当前可见的那个**：一个任务里有好几个子 tab，全部渲染等于白算几遍
    * （得分分布一次 5~20 ms，大表更久）。切回来时重渲染一次即可。
    */
   function mountSubTabs(
@@ -1721,7 +1736,7 @@ export function mount(root: HTMLElement): void {
   // tab 装配
   // -------------------------------------------------------------------------
 
-  const TABS: Tab[] = [growthTab, qualityTab, moreTab];
+  const TABS: Tab[] = [growthTab, qualityTab, basicTab];
   const TAB_IMPL: Record<string, Tab> = Object.fromEntries(TABS.map((t) => [t.id, t]));
 
   const staleTabs = new Set<string>();
