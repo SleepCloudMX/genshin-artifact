@@ -1581,8 +1581,13 @@ export function mount(root: HTMLElement): void {
    * 三张主词条图共用一条轴，柱高才能横向比（最高的那根是沙的大生命 26.68%）；
    * 权重图也固定一条，点掉 / 恢复某个词条时前后可比
    * （最大 150 / 1025 ≈ 14.6%，`niceAxis` 会把它抬到 20%）。
+   *
+   * 主词条那条给 **0.32 再走 `tightAxis`**（×1.06 → 33.9%）：
+   * 直接按 30% 的话，最高的那根离绘图区上沿只剩十几像素，柱顶的数字挤在缝里
+   * （作者 2026-10-08 报的「时之沙柱子上的标注有点重叠」）；
+   * 而交给 `niceAxis` 只会跳到 **40%** —— 那是作者退过的「上面空一大截」。
    */
-  const MAIN_PROB_AXIS = 0.3;
+  const MAIN_PROB_AXIS = 0.32;
   const WEIGHT_AXIS = 0.16;
 
   /**
@@ -1653,9 +1658,8 @@ export function mount(root: HTMLElement): void {
             // ① 三个部位各一张：柱高 = 该部位的 P(主词条)。
             //    三张共用一条纵轴，柱高才能横向比（最高的那根是沙的大生命 26.68%）。
             //
-            //    **先把三个格子都挂上、再画**：`auto-fit` 的列数取决于有几个格子，
-            //    边挂边画时第一张量到的还是「整行」的宽度（后两张一加进来就被缩窄了），
-            //    于是那张图的字号会跟着缩水。
+            //    **先把三个格子都挂上、再画**：列数取决于有几个格子（`grid-auto-flow: dense`），
+            //    边挂边画时第一张量到的还不是最终宽度，那张图的字号会跟着缩水。
             const p1 = panel(C.MAIN_PROB_TITLE, C.MAIN_PROB_HINT);
             const stack = node('div', { class: 'chart-stack' });
             // 概率降序：柱状图的读法就是「谁大谁小」，按大小排最省事
@@ -1683,8 +1687,12 @@ export function mount(root: HTMLElement): void {
                   // 一个部位一个色相（颜色 = 部位），标题左边那块小色块是它的凭据
                   tone: MAIN_PROB_TONES[pos],
                   upper: MAIN_PROB_AXIS,
+                  // 贴着峰值定上限（见 `MAIN_PROB_AXIS`）：给最高那根的柱顶标号留出空间
+                  tight: true,
                   width: chartWidth(wrap),
-                  height: 230,
+                  // 压扁：块高从 230 收到 168（作者 2026-10-08：整页不要滚动条）。
+                  // 画布矮了但**绘图区没矮多少** —— `renderHistogram` 的上下边距同时收紧了
+                  height: 168,
                   host: wrap,
                   tooltip: tabCtx.tooltip,
                   // 图上只有百分比，把官方权重（分子 / 该部位之和）补上 —— 概率就是这两个数之比
@@ -1725,7 +1733,7 @@ export function mount(root: HTMLElement): void {
                   title: C.weightsChartTitle(excluded),
                   upper: WEIGHT_AXIS,
                   width: chartWidth(chart),
-                  height: 260,
+                  height: 176,
                   host: chart,
                   tooltip: tabCtx.tooltip,
                   // 图上读不到的只有一件事：这个数是怎么来的（分子 / 分母）。

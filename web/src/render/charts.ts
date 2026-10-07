@@ -779,7 +779,9 @@ export function renderHistogram(opts: HistogramOptions): SVGSVGElement {
   const f = frame({
     width,
     height,
-    margin: { top: 40, right: 18, bottom: 48, left: 52 },
+    // 上下边距按「图内标题占 26、横轴标号占 40」给：再宽只是白边，
+    // 而画布本身常常被压扁（「词条权重」那几张），边距一大绘图区就没高度了
+    margin: { top: 26, right: 18, bottom: 40, left: 52 },
     title,
     ...(opts.tone ? { titleChip: `var(${opts.tone})` } : {}),
     ariaLabel: title ?? '分布',
