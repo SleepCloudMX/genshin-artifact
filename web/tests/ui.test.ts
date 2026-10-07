@@ -1263,6 +1263,29 @@ describe('配置序列化', () => {
       expect(back.slots[i]!.weight).toBe(s.slots[i]!.weight);
       expect(back.slots[i]!.initialRoll).toBe(s.slots[i]!.initialRoll);
     }
+    // 词条表整张往返：条数、顺序、权重都对得上
+    expect(back.rows).toEqual(s.rows);
+  });
+
+  it('词条表的链接写法：空行不写、权重 0 的行照写（表上看得见就该还原）', () => {
+    const s = defaultState();
+    s.rows = [
+      { attr: '暴击', weight: 3 },
+      { attr: '', weight: 1 }, // 加出来还没选词条的空行：不进链接
+      { attr: '充能', weight: 0 }, // 权重 0：行还在，链接也要还原它
+      { attr: '精通', weight: 2 },
+    ];
+    expect(toQuery(s)).toContain(`qw=${encodeURIComponent('暴击:3,充能:0,精通:2')}`);
+    expect(fromQuery('?' + toQuery(s)).rows).toEqual([
+      { attr: '暴击', weight: 3 },
+      { attr: '充能', weight: 0 },
+      { attr: '精通', weight: 2 },
+    ]);
+  });
+
+  it('链接里与主词条冲突的行在入口就被剔掉', () => {
+    const back = fromQuery('?slot=头&main=暴击&slots=暴击:2,暴伤:1,:0,:0&qw=' + encodeURIComponent('暴击:3,暴伤:3'));
+    expect(back.rows.map((r) => r.attr)).toEqual(['暴伤']);
   });
 
   it('深色主题也能往返', () => {
