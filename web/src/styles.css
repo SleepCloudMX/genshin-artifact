@@ -509,6 +509,14 @@ button.ghost.small { flex: none; padding: 5px 10px; font-size: 12px; }
 .chart-wrap { width: 100%; }
 svg.chart { display: block; width: 100%; height: auto; }
 
+/* 图里的文字一律不吃鼠标事件。
+   作者 2026-10-07 报的：「在背景有悬浮框，但光标移动到文字上反倒没有了」——
+   画在热区之上的 `<text>`（热力图格子里的数字最典型）会成为命中目标，
+   底下的热区随即收到 `mouseleave`，浮框就被收掉了。
+   文字透明之后，命中永远落在它下面那块真正的交互面上（热区 / 格子 / 扇区）。 */
+svg.chart text,
+svg.pie text { pointer-events: none; }
+
 .chart-title { fill: var(--text); font-size: 13px; font-weight: 650; }
 .grid { stroke: var(--grid); stroke-width: 1; }
 .axis-line { stroke: var(--axis); stroke-width: 1; }
